@@ -50,18 +50,17 @@ echoResponse(200, $response);
 $app->get('/TestNotification', function()
 {
 	// token user request
-	$to = "fxNQj2YjL_0:APA91bFuvxcULB21Z1t2ZL9wAT1Nde9bbmtnUs4M0xOHcxq-zDoXBHnvzSGkTNS8NQ5nDK25MBEma6oQ35FQCqnJuYypF1p0vLuEv0jMl1w2U_XhFzPbKEps1pLqj9espZ-vxi-Lw7CH";
+	$to = getToken('admin');
 	$result = pushNotification($to, "Autorización", "Se ha aprovado la autorización de leonel.", array());	
 	echo $result;
 });
 
-$app->post('/userToken', 'authenticate', function() use ($app) 
+$app->post('/AutorizationPending/token/:userName/:userPass/:tokenApi', function($userName, $userPass, $tokenApi) use ($app)
 {
 	try 
 	{
 		$response = array();
 		$entityBody = file_get_contents('php://input');
-		$obj = json_decode($entityBody);
 		
 		//Almacenamos en base de datos
 		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
@@ -74,7 +73,7 @@ $app->post('/userToken', 'authenticate', function() use ($app)
 		error_reporting(E_ALL);
 
 		$exist = 0;
-		$query = mssql_query(sprintf("SELECT count(*) as total FROM APP_USER where id_user = '%s'",$obj->userName));
+		$query = mssql_query(sprintf("SELECT count(username) as total FROM APP_USER_PROFILE where username = '%s'",$userName));
 		$clientes = array();
 		if (!is_null($query))
 		{
@@ -84,14 +83,15 @@ $app->post('/userToken', 'authenticate', function() use ($app)
 			}			
 		}
 		
-		$query_header = sprintf("insert into APP_USER(id_user, token) values('%s', '%s')",
-			$obj->userName, //id user
-			$obj->id
+		$query_header = sprintf("insert into APP_USER_PROFILE (username, userpass, token) values('%s', '%s', '%s')",
+			$userName, //id user
+			$userPass,
+			$tokenApi
 		);
-		if($exist >0){
-			$query_header = sprintf("update APP_USER set id_user = '%s', token = '%s'",
-				$obj->userName, //id user
-				$obj->id
+		if($exist > 0){
+			$query_header = sprintf("update APP_USER_PROFILE set token = '%s' where username = '%s'",				
+			$tokenApi,
+			$userName //id user
 			);
 		}
 		mssql_query("BEGIN TRAN");
@@ -101,15 +101,33 @@ $app->post('/userToken', 'authenticate', function() use ($app)
 	} 
 	catch (Exception $e) 
 	{
-		$obj->cod_transp = $e->getMessage();
-		return echoResponse(201, $obj);
+		return echoResponse(201, null);
 	} 
 	finally 
 	{
-		return echoResponse(201,$obj);
+		return echoResponse(200, null);
 	}
 });
 
+function getToken($userName){
+	$token = '';
+
+	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD) or die("Couldn't connect to SQL Server on $myServer. Error: " . mssql_get_last_message());;
+	mssql_select_db(DB_NAME, $link);
+	$query = mssql_query("SELECT token FROM APP_USER_PROFILE where USERNAME = '".$userName."'");	
+	if (!is_null($query))
+	{
+		while ($row = mssql_fetch_assoc($query)) 
+		{
+
+			$token = $row['token'];				
+		}					
+		mssql_free_result($query);
+		mssql_close($link);
+	}
+
+	return trim($token);
+}
 
 function pushNotification($token, $title, $message, $data){
 	$url = 'https://fcm.googleapis.com/fcm/send';
@@ -125,7 +143,8 @@ function pushNotification($token, $title, $message, $data){
 	
 	$root = array(
 		'to'             => $token,
-		'notification'      => $message
+		'notification'      => $message,
+		'data'      => $data
 	);
 	
 	//Clave del servidor
@@ -188,11 +207,11 @@ $app->get('/Clients', 'authenticate', function ()  use ($app)
 		//$response = $clientes;
 		
 		mssql_free_result($query);
-		mssql_close($link);
 		
-		echoResponse(200, $clientes);
 
 	}	
+	mssql_close($link);		
+	return echoResponse(200, $clientes);
 });
 
 $app->get('/Products', 'authenticate',   function () use ($app) 
@@ -222,18 +241,12 @@ $app->get('/Products', 'authenticate',   function () use ($app)
 				$product->EMPAQUE  = $row['EMPAQUE'];
 				$product->CANT_DECIMAL_MEDIDA  = $row['CANT_DECIMAL_MEDIDA'];
 			$products[] = $product;		
-		}
-	
-		/*$response["error"] = false;
-		$response["quantity"] = count($products);
-		$response["products"] = $products;*/
+		}	
 		
-		mssql_free_result($query);
-		mssql_close($link);
-		
-		echoResponse(200, $products);
-
+		mssql_free_result($query);		
 	}	
+	mssql_close($link);		
+	return echoResponse(200, $products);
 });
 
 $app->get('/Products/:idClient', 'authenticate', function ($idClient) use ($app) 
@@ -526,8 +539,24 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 		//mssql_free_result($res);
 		mssql_close($link);
 
+		// envia notificacion de la situacion de la autorizacion al usuario
+		$to = getToken($obj->shoppingCart->user->name);
+		if($to){
+			$message = "Se ha ".$obj->state." el ";
+			if($obj->orderType == 'BUDGET'){
+				$message = $message ."PRESUPUESTO";
+			}else{			
+				$message = $message ."PRECIO ESPECIAL";
+			}
+			
+			pushNotification($to, "Autorización de ".$obj->shoppingCart->client->nom_com, $message, $obj);			
+		}
+		
 		// TODO realizar proceso de presupuesto o Orden
-				
+		if($obj->orderType == 'BUDGET' && $obj->state == 'AUTORIZADO'){
+			sendMailsPresupuesto($obj);
+			savePresupuesto($obj);
+		}	
 	} 
 	catch (Exception $e) 
 	{
@@ -535,7 +564,7 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 		return echoResponse(202, $obj);
 	} 
 	finally 
-	{
+	{		
 		return echoResponse(201,$obj);
 	}
 });
@@ -547,35 +576,6 @@ $app->get('/AutorizationPending/', 'authenticate', function () use ($app)
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD) or die("Couldn't connect to SQL Server on $myServer. Error: " . mssql_get_last_message());;
 	mssql_select_db(DB_NAME, $link);
 	$query = mssql_query('SELECT cast(json as varchar(MAX)) as jsonObject FROM APP_AUTORIZATION where type <> 7');
-	
-	$autorizations = array();
-	if (!is_null($query))
-	{
-		while ($row = mssql_fetch_assoc($query)) 
-		{
-			//$autorization = new Autorization;
-			$autorization= json_decode($row['jsonObject']);			
-			$autorizations[] = $autorization;
-		}
-	
-		mssql_free_result($query);
-		mssql_close($link);
-		
-		echoResponse(200, $autorizations);
-	}	
-});
-
-$app->get('/AutorizationStatus/', 'authenticate', function () use ($app)
-{	
-	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD) or die("Couldn't connect to SQL Server on $myServer. Error: " . mssql_get_last_message());;
-	mssql_select_db(DB_NAME, $link);
-
-	$entityBody = file_get_contents('php://input');	
-	$obj = json_decode($entityBody);
-
-	//id, id_user, id_client
-	$query = mssql_query(sprintf("SELECT status FROM APP_AUTORIZATION where id_user = '%s'",$obj->id, $obj->id_user, $obj->id_client));
-	
 	
 	$autorizations = array();
 	if (!is_null($query))
@@ -698,11 +698,6 @@ $app->get('/TestServer', function()
 	echo "Server OK";
 });
 
-$app->get('/TestNotification', function()
-{
-	echo "Server OK";
-});
-
 $app->get('/TestDB', function()
 {
 	$lastOrderNumber = getNextOrderNumber();
@@ -808,6 +803,7 @@ $app->get('/User/:userName/:password', 'authenticate', function($userName, $pass
 				}
 				else
 				{
+					mssql_close($link);
 					return echoResponse(200, null);
 				}
 				
@@ -823,7 +819,7 @@ $app->get('/User/:userName/:password', 'authenticate', function($userName, $pass
 			$user->rolName = "Cliente";
 		}
 	}
-
+	mssql_close($link);
 	return echoResponse(200, $user);
 });
 
@@ -855,6 +851,7 @@ function getNextOrderNumber()
 	$nextNumber = sprintf(" 0005%s", $suffix);
 		
 	mssql_free_result($query);
+	mssql_close($link);
 	return $nextNumber;
 }
 
@@ -883,6 +880,7 @@ function getNextBudgetNumber()
 	$nextNumber = sprintf("B0005%s", $suffix);
 		
 	mssql_free_result($query);
+	mssql_close($link);
 	return $nextNumber;
 }
 
@@ -911,6 +909,7 @@ function getLastAutorizationNumber()
 	$nextNumber = sprintf("B0005%s", $suffix);
 		
 	mssql_free_result($query);
+	mssql_close($link);
 	return $nextNumber;
 }
 
@@ -934,6 +933,7 @@ function getCotizacion()
 	}
 
 	mssql_free_result($query);
+	mssql_close($link);
 	return $dolar;
 }
 
@@ -1339,9 +1339,143 @@ function sendMails($order)
 	//#endregion
 }
 
+function savePresupuesto($presupuesto){
+	try 
+	{
+		$response = array();
+		$entityBody = file_get_contents('php://input');
+		$obj = new Order;
+		$obj = json_decode($entityBody);
+
+		//Almacenamos en base de datos
+		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
+		mssql_select_db(DB_NAME, $link);
+		
+		ini_set('display_errors', 1);
+		ini_set('display_startup_errors', 1);
+		ini_set('mssql.charset', 'utf-8');
+		ini_set('memory_limit', '1024M');
+		error_reporting(E_ALL);
+
+
+		//Obtenemos el �ltimo n�mero de pedido
+		$lastOrderNumber = getNextOrderNumber();
+		$dolar = getCotizacion();
+		
+		//LEYENDA
+		$leyenda_1 = "";
+		$leyenda_2 = "";
+		$leyenda_3 = "";
+		$leyenda_4 = "";
+		$leyenda_5 = "";
+		
+		$resultado = 0;
+		$array = str_split($obj->shoppingCart->comment, 60);
+		$resultado = count($array);
+		switch($resultado)
+		{
+			case 0:
+				break;
+			case 1:
+				$leyenda_1 = $array[0];
+				break;
+			case 2:
+				$leyenda_1 = $array[0];
+				$leyenda_2 = $array[1];
+				break;
+			case 3:
+				$leyenda_1 = $array[0];
+				$leyenda_2 = $array[1];
+				$leyenda_3 = $array[2];
+				break;
+			case 4:
+				$leyenda_1 = $array[0];
+				$leyenda_2 = $array[1];
+				$leyenda_3 = $array[2];
+				$leyenda_4 = $array[3];
+				break;
+			case 5:
+				$leyenda_1 = $array[0];
+				$leyenda_2 = $array[1];
+				$leyenda_3 = $array[2];
+				$leyenda_4 = $array[3];
+				$leyenda_5 = $array[4];
+				break;
+			default:
+				$leyenda_1 = $array[0];
+				$leyenda_2 = $array[1];
+				$leyenda_3 = $array[2];
+				$leyenda_4 = $array[3];
+				$leyenda_5 = $array[4];
+				break;
+		}
+
+		// ************
+		// CABECERA DEL PRESUPUESTO
+		// ************
+		$query_header = sprintf("insert into GVA08 (cod_client, cod_vended, cond_vta, estado, mon_cte, terminal_ingreso, leyenda_1, leyenda_2, leyenda_3, leyenda_4, leyenda_5, cod_transp, usuario_ingreso, importe ,id_direccion_entrega,cotiz, talonario) 
+		values ('%s', '%s', %d, 2, 1, 'APP','%s','%s','%s','%s','%s','%s','%s',%f,'%d', %f, %d)",
+		 $obj->shoppingCart->client->cod_client, //COD_CLIENT
+		 (!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
+		 $obj->shoppingCart->client->cond_vta, //COND_VTA		 		 
+		 $leyenda_1, //LEYENDA_1
+		 $leyenda_2, //LEYENDA_2
+		 $leyenda_3, //LEYENDA_3
+		 $leyenda_4, //LEYENDA_4
+         $leyenda_5, //LEYENDA_5
+		 
+		 (!isset($obj->shoppingCart->client->cod_transp) || is_null($obj->shoppingCart->client->cod_transp))?"":$obj->shoppingCart->client->cod_transp, //COD_TRANSP
+		 $obj->shoppingCart->user->name, //USUARIO_INGRESO
+		 $obj->total,//IMPORTE
+		 
+		 (!isset($obj->shoppingCart->client->id_direccion_entrega) || is_null($obj->shoppingCart->client->id_direccion_entrega))?"114":$obj->shoppingCart->client->id_direccion_entrega, //ID_DIRECCION_ENTREGA
+		 $dolar, //COtizacion dolar
+		 $obj->shoppingCart->client->talonario //TALONARIO
+		 );
+		
+		// ************
+		// DETALLE DEL PRESUPUESTO
+		// ************
+		$nroRenglon = 1;
+		$query_detalle = "";
+		$query_stock = "";
+		foreach ($obj->shoppingCart->shoppingProducts as $producto) 
+		{
+			$query_detalle .= sprintf("insert into gva09 (COD_ARTICU, CANT_TOTAL, ESTADO, PRECIO, ID_MEDIDA_VENTAS, UNIDAD_MEDIDA_SELECCIONADA, NRO_RENGL, TALONARIO) 
+				VALUES ('%s', '%d', 2, %f, 14, 'P', %d, %d); ", 				
+				$producto->COD_ARTICULO, 
+				$producto->quantity,
+				$producto->PRECIO, 
+				$nroRenglon,
+				$obj->shoppingCart->client->talonario
+			);
+			$nroRenglon = $nroRenglon+1;			
+
+		}
+
+		mssql_query("BEGIN TRAN");
+			mssql_query($query_header) or die(mssql_get_last_message());
+			mssql_query($query_detalle) or die(mssql_get_last_message());
+		mssql_query("COMMIT");
+
+		//mssql_free_result($res);
+		mssql_close($link);
+		$obj->state = "enviado";
+	} 
+	catch (Exception $e) 
+	{
+		$obj->state = "no enviado";
+	} 
+	finally 
+	{
+		return echoResponse(201,$obj);
+	}
+
+}
 
 function sendMailsPresupuesto($presupuesto)
 {
+	
 	$dolar = getCotizacion();
 	$mail = new PHPMailer;
 	$mail->IsSMTP(); // telling the class to use SMTP
@@ -1354,16 +1488,10 @@ function sendMailsPresupuesto($presupuesto)
 	$mail->SMTPSecure = "tls";  
 	$mail->Host       = "smtp.gmail.com";//"mail.dbdistribuidora.com"; //;      // SMTP server
 	$mail->Port       = 587;                   // SMTP port
-	$mail->Username   = "dbdistribuiodora.ventasapp@gmail.com";//"ventasapp@dbdistribuidora.com";//"fernando.ariel.tello@gmail.com";//;  // username
-	$mail->Password   = "VentasApp";//"Elefante01"; //; // password
-	$mail->SetFrom('dbdistribuiodora.ventasapp@gmail.com', 'Ventas APP');
-
-	//Destinatarios
-	/*
-	$toAddressLimit = "fernando.ariel.tello@gmail.com";
-    $toAddressStock = "fernando.ariel.tello@gmail.com";
-    $toAddressSpecial = "fernando.ariel.tello@gmail.com";
-	*/
+	$mail->Username   = "garofolo.leonel@gmail.com";//"ventasapp@dbdistribuidora.com";//"fernando.ariel.tello@gmail.com";//;  // username
+	$mail->Password   = "30121Daddy";//"Elefante01"; //; // password
+	$mail->SetFrom('garofolo.leonel@gmail.com', 'Ventas APP');
+	
 	$sendSotck = false;
 	$sendLimit = false;
 	$total = 0.00;
@@ -1386,15 +1514,14 @@ function sendMailsPresupuesto($presupuesto)
 	$products = "<table style=\"font-family: arial, sans-serif;border-collapse: collapse;width: 100%;\">";
 	//Cliente y Vendedro
 	$products .= "<tr " . $styleRow . "><td colspan=\"2\" " . $styleBackgroundHeader . ">Datos del cliente</td><td colspan=\"2\" " . $styleBackgroundHeader . ">Datos del Vendedor</td><td colspan=\"2\" " . $styleBackgroundHeader . ">Despacho</td></tr>";
-	$products .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\" ><b>Fecha Creaci�n:</b> %s</td></tr>", $order->shoppingCart->client->nom_com, $order->shoppingCart->user->name, $order->date);
-	$products .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Direcci�n:</b> %s</td><td colspan=\"2\"><b>Tipo:</b> %s</td><td colspan=\"2\" ><b>Fecha Entrega:</b> %s</td></tr>", $order->shoppingCart->client->dir_com, $order->shoppingCart->user->rolName, $order->deliveryDate);
+	$products .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\" ><b>Fecha Creaci�n:</b> %s</td></tr>", $presupuesto->shoppingCart->client->nom_com, $presupuesto->shoppingCart->user->name, $presupuesto->date);
 	
-	//Productos
+	// Productos
 	
-	$products .= "<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Productos del pedido</td></tr>";
+	$products .= "<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Productos del Presupuesto</td></tr>";
 	$products .= "<tr " . $styleRow . "><th>Nombre</th><th>C�digo</th><th>Cantidad</th><th></th><th>Precio unidad (U\$S)</th><th>Precio Total (U\$S)</th></tr>";
 	
-	foreach ($order->shoppingCart->shoppingProducts as $product)
+	foreach ($presupuesto->shoppingCart->shoppingProducts as $product)
 	{
 		$total = $total + ($product->quantity * $product->PRECIO);
 		$products .= sprintf(
@@ -1410,29 +1537,28 @@ function sendMailsPresupuesto($presupuesto)
 	$products .= sprintf("<tr " . $styleRow . "><td></td><td></td><td></td><td></td><td><b>TOTAL (U\$S)</b></td><td><b>%.2f</b></td></tr>", $total*1.21);
 
 	// Observaciones
-	$products .= sprintf("<tr " . $styleRow . "><td colspan=\"6\" ".$styleBackgroundHeader.">Observaciones</td></tr><tr " . $styleRow . "><td colspan=\"6\">%s</td></tr>", ($order->shoppingCart->comment === NULL) ? "Sin observaciones" : $order->shoppingCart->comment);
+	$products .= sprintf("<tr " . $styleRow . "><td colspan=\"6\" ".$styleBackgroundHeader.">Observaciones</td></tr><tr " . $styleRow . "><td colspan=\"6\">%s</td></tr>", ($presupuesto->shoppingCart->comment === NULL) ? "Sin observaciones" : $presupuesto->shoppingCart->comment);
 
 	$products .= "</table>";
 
 	//*************************************************
 	//*************************************************
-	// PEDIDOS SIN STOCK
+	// PRESUPUESTO SIN STOCK
 	//*************************************************
 	//*************************************************
-	#region Tabla pedido Sin Stock
+	#region Tabla presupuesto Sin Stock
 	$total = 0.0;
 	$productsSinStock = "<table style=\"font-family: arial, sans-serif;border-collapse: collapse;width: 100%;\">";
 	//Cliente y Vendedro
 	$productsSinStock .= "<tr " . $styleRow . "><td colspan=\"2\" " . $styleBackgroundHeader . ">Datos del cliente</td><td colspan=\"2\" " . $styleBackgroundHeader . ">Datos del Vendedor</td><td colspan=\"2\" " . $styleBackgroundHeader . ">Despacho</td></tr>";
-	$productsSinStock .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\"><b>Fecha Creaci�n:</b> %s</td></tr>", $order->shoppingCart->client->nom_com, $order->shoppingCart->user->name, $order->date);
-	$productsSinStock .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Direcci�n:</b> %s</td><td colspan=\"2\"><b>Tipo:</b> %s</td><td colspan=\"2\"><b>Fecha Entrega:</b> %s</td></tr>", $order->shoppingCart->client->dir_com, $order->shoppingCart->user->rolName, $order->deliveryDate);
-
+	$productsSinStock .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\"><b>Fecha Creaci�n:</b> %s</td></tr>", $presupuesto->shoppingCart->client->nom_com, $presupuesto->shoppingCart->user->name, $presupuesto->date);
+	
 	//Productos
 	$productsSinStock .= "<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Productos sin stock</td></tr>";
 	$productsSinStock .= "<tr " . $styleRow . "><th>Nombre</th><th>C�digo</th><th>Cantidad Solicitada</th><th>Cantidad Faltante</th><th>Precio unidad (U\$S)</th><th>Precio Total (U\$S)</th></tr>";
 	$style = "";
 	$stockFaltante = 0.0;
-	foreach ($order->shoppingCart->shoppingProducts as $product)
+	foreach ($presupuesto->shoppingCart->shoppingProducts as $product)
 	{
 
 		if (($product->STOCK - $product->quantity) < 0)
@@ -1461,14 +1587,14 @@ function sendMailsPresupuesto($presupuesto)
 	$productsSinStock .= sprintf("<tr " . $styleRow . "><td></td><td></td><td></td><td></td><td><b>TOTAL (U\$S)</b></td><td><b>%.2f</b></td></tr>", $total*1.21);
 
 	// Observaciones
-	$productsSinStock .= sprintf("<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Observaciones</td></tr><tr " . $styleRow . "><td colspan=\"6\">%s</td></tr>", ($order->shoppingCart->comment === NULL) ? "Sin observaciones" : $order->shoppingCart->comment);
+	$productsSinStock .= sprintf("<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Observaciones</td></tr><tr " . $styleRow . "><td colspan=\"6\">%s</td></tr>", ($presupuesto->shoppingCart->comment === NULL) ? "Sin observaciones" : $presupuesto->shoppingCart->comment);
 
 	$productsSinStock .= "</table>";
 	//endregion
 	
 	//*************************************************
 	//*************************************************
-	// #region Tabla pedido l�mite superado
+	// #region Tabla presupuesto l�mite superado
 	//*************************************************
 	//*************************************************
 	
@@ -1476,17 +1602,12 @@ function sendMailsPresupuesto($presupuesto)
 	$productsLimite = "<table style=\"font-family: arial, sans-serif;border-collapse: collapse;width: 100%;\">";
 	//Cliente y Vendedro
 	
-	$productsLimite .= "<tr " . $styleRow . "><td colspan=\"2\" " . $styleBackgroundHeader . ">Datos del cliente</td><td colspan=\"2\" " . $styleBackgroundHeader . ">Datos del Vendedor</td><td colspan=\"2\" " . $styleBackgroundHeader . ">Despacho</td></tr>";
-	
-	$productsLimite .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\" ><b>Fecha Creaci�n:</b> %s</td></tr>", $order->shoppingCart->client->nom_com, $order->shoppingCart->user->name, $order->date);
-	
-	$productsLimite .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Direcci�n:</b> %s</td><td colspan=\"2\"><b>Tipo:</b> %s</td><td colspan=\"2\" ><b>Fecha Entrega:</b> %s</td></tr>", $order->shoppingCart->client->dir_com, $order->shoppingCart->user->rolName, $order->deliveryDate);
-
+	$productsLimite .= "<tr " . $styleRow . "><td colspan=\"2\" " . $styleBackgroundHeader . ">Datos del cliente</td><td colspan=\"2\" " . $styleBackgroundHeader . ">Datos del Vendedor</td><td colspan=\"2\" " . $styleBackgroundHeader . ">Despacho</td></tr>";		
 	
 	//Productos
-	$productsLimite .= "<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Productos del pedido</td></tr>";
+	$productsLimite .= "<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Productos del Presupuesto</td></tr>";
 	$productsLimite .= "<tr " . $styleRow . "><th>Nombre</th><th>C�digo</th><th>Cantidad</th><th></th><th>Precio unidad (U\$S)</th><th>Precio Total (U\$S)</th></tr>";
-	foreach ($order->shoppingCart->shoppingProducts as $product)
+	foreach ($presupuesto->shoppingCart->shoppingProducts as $product)
 	{
 		$total = $total + ($product->quantity * $product->PRECIO);
 		$productsLimite .= sprintf(
@@ -1497,7 +1618,7 @@ function sendMailsPresupuesto($presupuesto)
 	// Total
 	// Agregamos IVA
 	$sendLimit = false;
-	$limite = ((($order->shoppingCart->client->cupo_credi/ $dolar)) - ($order->shoppingCart->client->saldo_cc/ $dolar));
+	$limite = ((($presupuesto->shoppingCart->client->cupo_credi/ $dolar)) - ($presupuesto->shoppingCart->client->saldo_cc/ $dolar));
 	if (($total*1.21) > $limite)
 	{
 		$sendLimit = true;
@@ -1507,7 +1628,7 @@ function sendMailsPresupuesto($presupuesto)
 	$productsLimite .= sprintf("<tr " . $styleRowSinStock . "><td></td><td></td><td></td><td></td><td><b>EXCESO (U\$S)</b></td><td><b>%.2f</b></td></tr>", ($total*1.21)-$limite);
 
 	 // Observaciones
-	$productsLimite .= sprintf("<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Observaciones</td></tr><tr " . $styleRow . "><td colspan=\"6\">%s</td></tr>", ($order->shoppingCart->comment=== NULL) ? "Sin observaciones" : $order->shoppingCart->comment);
+	$productsLimite .= sprintf("<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Observaciones</td></tr><tr " . $styleRow . "><td colspan=\"6\">%s</td></tr>", ($presupuesto->shoppingCart->comment=== NULL) ? "Sin observaciones" : $presupuesto->shoppingCart->comment);
 
 
 	$productsLimite .= "</table>";
@@ -1515,41 +1636,38 @@ function sendMailsPresupuesto($presupuesto)
 	//Alerta de entrega especial.Posibilidad de mail a log�stica
 	//********************************************************
 	//El metodo que envia debe contener lo siguiente
-	if (true)
+	if ($presupuesto->shoppingCart->user->name === $presupuesto->shoppingCart->client->nom_com)
 	{
-		if ($order->shoppingCart->user->name === $order->shoppingCart->client->nom_com)
-		{
-			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un pedido. A continuaci�n se describen los detalles del mismo:<br/><br/>", $order->shoppingCart->user->rolName,  $order->shoppingCart->client->nom_com);
-		}
-		else
-		{
-			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un pedido para el cliente <b>%s</b>. A continuaci�n se describen los detalles del mismo:<br/><br/>", $order->shoppingCart->user->rolName, $order->shoppingCart->user->name, $order->shoppingCart->client->nom_com);
-		}
-		
-		
-		$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
-		$subject = "DB Distribuidora - Pedido Realizado";
-		$body = $intro.$products.$sign; 
-		
-		$mail->CharSet = 'UTF-8';
-		$mail->Subject = $subject;
-		$mail->MsgHTML($body);
-		$mail->ClearAddresses();
-		$mail->ClearCCs();
-		$mail->ClearBCCs();
-		$mail->AddAddress('garofolo.leonel@gmail.com', 'Leonel Garofolo');
-		/* DESCOMENTAR
-		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');		
-		if (!is_null($order->shoppingCart->user->user_email) && isset($order->shoppingCart->user->user_email))
-		{
-			$mail->AddCC($order->shoppingCart->user->user_email, $order->shoppingCart->user->name);
-		}
-		*/
-		$mail->Send();
-		$mail->ClearAddresses();
-		$mail->ClearCCs();
-		$mail->ClearBCCs();		
+		$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName,  $presupuesto->shoppingCart->client->nom_com);
 	}
+	else
+	{
+		$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto para el cliente <b>%s</b>. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
+	}
+	
+	
+	$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
+	$subject = "DB Distribuidora - Presupuesto Realizado";
+	$body = $intro.$products.$sign; 
+	
+	$mail->CharSet = 'UTF-8';
+	$mail->Subject = $subject;
+	$mail->MsgHTML($body);
+	$mail->ClearAddresses();
+	$mail->ClearCCs();
+	$mail->ClearBCCs();
+	$mail->AddAddress('garofolo.leonel@gmail.com', 'Leonel Garofolo');
+	/* DESCOMENTAR
+	$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');		
+	if (!is_null($presupuesto->shoppingCart->user->user_email) && isset($presupuesto->shoppingCart->user->user_email))
+	{
+		$mail->AddCC($presupuesto->shoppingCart->user->user_email, $presupuesto->shoppingCart->user->name);
+	}
+	*/
+	$mail->Send();
+	$mail->ClearAddresses();
+	$mail->ClearCCs();
+	$mail->ClearBCCs();	
 	//#endregion
 }
 function getStringValue($input)
