@@ -27,7 +27,8 @@ class Client extends User {
     public $textToFilter;
 	public $id_direccion_entrega;
 	public $talonario;
-	public $cod_transp;
+    public $cod_transp;
+    public $historial_productos;
 	
 	function __construct() 
 	{
@@ -47,8 +48,15 @@ class Client extends User {
 		$this->textToFilter = "";
 		$this->id_direccion_entrega = "";
 		$this->talonario = 0;
-		$this->cod_transp = "";
+        $this->cod_transp = "";
+        $this->historial_productos = "";
 	}
+}
+
+class HistorialProduct 
+{
+    public $COD_ARTICULO;
+    public $DESCRIPCION;
 }
 
 class Product 
