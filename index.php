@@ -202,9 +202,8 @@ $app->get('/Clients', 'authenticate', function ()  use ($app)
 			$cliente->cond_vta   = $row['cond_vta'];
 			$cliente->id_direccion_entrega = $row['id_direccion_entrega'];
 			$cliente->talonario = $row['talonario'];
-
+			
 			$historialProd = array();
-			print_r($row['hist']);
 			if($row['hist'] != null){
 				
 				$splitArray = explode('|', $row['hist']);
@@ -1268,6 +1267,7 @@ function sendMails($order)
 		$mail->ClearBCCs();
 		$mail->AddAddress("garofolo.leonel@gmail.com", "Leonel Garofolo");
 		/*
+		$mail->AddAddress('imartinez@dbdistribuidora.com', 'I Martinez');
 		$mail->AddAddress('rabdala@dbdistribuidora.com', 'R Abdala');
 		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');
 		$mail->AddCC('afigueroa@dbdistribuidora.com', 'Pedidos');
