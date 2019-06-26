@@ -172,7 +172,7 @@ $app->get('/Clients', 'authenticate', function ()  use ($app)
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD) or die("Couldn't connect to SQL Server on $myServer. Error: " . mssql_get_last_message());;
 	mssql_select_db(DB_NAME, $link);
 	$queryString = sprintf("SELECT c.*, 
-		cast(STUFF(( SELECT '| ' + hist.COD_ARTICU + '&' + hist.DESCRIPCION COLLATE Modern_Spanish_CI_AS
+		cast(STUFF(( SELECT distinct top 10 '| ' + hist.COD_ARTICU + '&' + hist.DESCRIPCION COLLATE Modern_Spanish_CI_AS
 		FROM APP_CLIENTES c_aux
 		left join APP_VIEW_HISTORIAL_CLIENTES hist on hist.COD_CLIENT = c_aux.cod_client COLLATE Modern_Spanish_CI_AS
 		where c_aux.cod_client = c.cod_client FOR XML PATH('') ) , 1, 1, '') as varchar(max)) as hist 
@@ -202,23 +202,19 @@ $app->get('/Clients', 'authenticate', function ()  use ($app)
 			$cliente->cond_vta   = $row['cond_vta'];
 			$cliente->id_direccion_entrega = $row['id_direccion_entrega'];
 			$cliente->talonario = $row['talonario'];
-			
-			$historialProd = array();
 			if($row['hist'] != null){
-				
+				$historialProd = array();
 				$splitArray = explode('|', $row['hist']);
 				foreach($splitArray as &$sProd){
 					$splitProduct = explode('&', $sProd);
 
-					$hist = new HistorialProduct;
-					$hist->COD_ARTICULO = $splitProduct[0];
-					$hist->DESCRIPCION = $splitProduct[1];
+					$hist = new HistorialProducto;
+					$hist->cod_articulo = $splitProduct[0];
+					$hist->descripcion = str_replace('&','',$splitProduct[1]);
 					array_push($historialProd, $hist);
 				}
-			}
-			$cliente->historial_productos = $historialProd;
-			   			
-			//echo json_encode($cliente);
+				$cliente->historial_productos = $historialProd;
+			}				
 			$clientes[] = $cliente;		
 		}
 		mssql_free_result($query);			
