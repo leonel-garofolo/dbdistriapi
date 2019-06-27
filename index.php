@@ -5,7 +5,7 @@ ini_set('mssql.charset', 'utf-8');
 ini_set('memory_limit', '1024M');
 error_reporting(E_ALL);
 	
-header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allddow-Origin: *");
 header('Access-Control-Allow-Credentials: true');
 header('Access-Control-Allow-Methods: PUT, GET, POST, DELETE, OPTIONS');
 header("Access-Control-Allow-Headers: X-Requested-With");
@@ -51,7 +51,8 @@ $app->get('/TestNotification', function()
 {
 	// token user request
 	$to = getToken('admin');
-	$result = pushNotification($to, "Autorización", "Se ha aprovado la autorización de leonel.", array());	
+	$obj = json_decode('{id=1}');
+	$result = pushNotification($to, "Autorización", "Se ha aprovado la autorización de leonel.", $obj);	
 	echo $result;
 });
 
@@ -167,11 +168,17 @@ function pushNotification($token, $title, $message, $data){
 }
 
 $app->get('/Clients', 'authenticate', function ()  use ($app) 
-{
-	
+{	
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD) or die("Couldn't connect to SQL Server on $myServer. Error: " . mssql_get_last_message());;
 	mssql_select_db(DB_NAME, $link);
-	$query = mssql_query('SELECT * FROM APP_CLIENTES');
+	$queryString = sprintf("SELECT c.*, 
+		cast(STUFF(( SELECT distinct top 10 '| ' + hist.COD_ARTICU + '&' + hist.DESCRIPCION COLLATE Modern_Spanish_CI_AS
+		FROM APP_CLIENTES c_aux
+		left join APP_VIEW_HISTORIAL_CLIENTES hist on hist.COD_CLIENT = c_aux.cod_client COLLATE Modern_Spanish_CI_AS
+		where c_aux.cod_client = c.cod_client FOR XML PATH('') ) , 1, 1, '') as varchar(max)) as hist 
+	FROM APP_CLIENTES c");
+
+	$query = mssql_query($queryString);
 	$clientes = array();
 	if (!is_null($query))
 	{
@@ -195,22 +202,24 @@ $app->get('/Clients', 'authenticate', function ()  use ($app)
 			$cliente->cond_vta   = $row['cond_vta'];
 			$cliente->id_direccion_entrega = $row['id_direccion_entrega'];
 			$cliente->talonario = $row['talonario'];
-			
-			//echo json_encode($cliente);
-			$clientes[] = $cliente;
+			if($row['hist'] != null){
+				$historialProd = array();
+				$splitArray = explode('|', $row['hist']);
+				foreach($splitArray as &$sProd){
+					$splitProduct = explode('&', $sProd);
 
-			//$clientes[] = $cliente;//array_map('utf8_encode',$cliente);		
+					$hist = new HistorialProducto;
+					$hist->cod_articulo = $splitProduct[0];
+					$hist->descripcion = str_replace('&','',$splitProduct[1]);
+					array_push($historialProd, $hist);
+				}
+				$cliente->historial_productos = $historialProd;
+			}				
+			$clientes[] = $cliente;		
 		}
-	
-		//$response["error"] = false;
-		//$response["quantity"] = count($clientes);
-		//$response = $clientes;
-		
-		mssql_free_result($query);
-		
-
-	}	
-	mssql_close($link);		
+		mssql_free_result($query);			
+	}
+	mssql_close($link);
 	return echoResponse(200, $clientes);
 });
 
@@ -394,10 +403,10 @@ $app->post('/Order', 'authenticate', function() use ($app)
 
 		}
 
-		mssql_query("BEGIN TRAN");
+		mssql_query("BEGIN TRAN");		
 			mssql_query($query_header) or die(mssql_get_last_message());
 			mssql_query($query_detalle) or die(mssql_get_last_message());
-			mssql_query($query_stock) or die(mssql_get_last_message());
+			mssql_query($query_stock) or die(mssql_get_last_message());			
 		mssql_query("COMMIT");
 
 		//mssql_free_result($res);
@@ -493,7 +502,7 @@ $app->post('/Budget', 'authenticate', function() use ($app)
 	} 
 	finally 
 	{
-		return echoResponse(201,$obj);
+		return echoResponse(200,$obj);
 	}
 });
 
@@ -700,7 +709,7 @@ $app->get('/TestServer', function()
 
 $app->get('/TestDB', function()
 {
-	$lastOrderNumber = getNextOrderNumber();
+	$lastOrderNumber = getNextOrderNumber() .' '.getCotizacion();	
 	return echoResponse(200, $lastOrderNumber);
 });
 
@@ -848,10 +857,8 @@ function getNextOrderNumber()
 	$calcNextNumber = substr($lastNumber, -5, 8); // Sacamos sucursal y espacio en blanco
 	$calcNextNumber = $calcNextNumber+1;
 	$suffix = str_pad($calcNextNumber,8,"0",STR_PAD_LEFT);
-	$nextNumber = sprintf(" 0005%s", $suffix);
-		
+	$nextNumber = sprintf(" 0005%s", $suffix);		
 	mssql_free_result($query);
-	mssql_close($link);
 	return $nextNumber;
 }
 
@@ -880,36 +887,6 @@ function getNextBudgetNumber()
 	$nextNumber = sprintf("B0005%s", $suffix);
 		
 	mssql_free_result($query);
-	mssql_close($link);
-	return $nextNumber;
-}
-
-function getLastAutorizationNumber()
-{
-	$nextNumber = "";
-	
-	//Almacenamos en base de datos
-	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
-	mssql_select_db(DB_NAME, $link);
-	$query = mssql_query('SELECT MAX(id) FROM APP_AUTORIZATION');
-	$maxNumber = mssql_fetch_array($query);
-
-	if ($maxNumber === NULL)
-	{
-		$lastNumber = "B000500000000";
-	}
-	else
-	{
-		$lastNumber = $maxNumber[0];
-	}
-
-	$calcNextNumber = substr($lastNumber, -5, 8); // Sacamos sucursal y espacio en blanco
-	$calcNextNumber = $calcNextNumber+1;
-	$suffix = str_pad($calcNextNumber,8,"0",STR_PAD_LEFT);
-	$nextNumber = sprintf("B0005%s", $suffix);
-		
-	mssql_free_result($query);
-	mssql_close($link);
 	return $nextNumber;
 }
 
@@ -933,7 +910,6 @@ function getCotizacion()
 	}
 
 	mssql_free_result($query);
-	mssql_close($link);
 	return $dolar;
 }
 
@@ -1287,6 +1263,7 @@ function sendMails($order)
 		$mail->ClearBCCs();
 		$mail->AddAddress("garofolo.leonel@gmail.com", "Leonel Garofolo");
 		/*
+		$mail->AddAddress('imartinez@dbdistribuidora.com', 'I Martinez');
 		$mail->AddAddress('rabdala@dbdistribuidora.com', 'R Abdala');
 		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');
 		$mail->AddCC('afigueroa@dbdistribuidora.com', 'Pedidos');
