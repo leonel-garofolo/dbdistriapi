@@ -49,14 +49,13 @@ class Client extends User {
 		$this->id_direccion_entrega = "";
 		$this->talonario = 0;
         $this->cod_transp = "";
-        $this->historial_productos = "";
 	}
 }
 
-class HistorialProduct 
+class HistorialProducto 
 {
-    public $COD_ARTICULO;
-    public $DESCRIPCION;
+    public $cod_articulo;
+    public $descripcion;
 }
 
 class Product 
