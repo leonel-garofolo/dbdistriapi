@@ -244,6 +244,7 @@ $app->get('/Products', 'authenticate',   function () use ($app)
 				$product->SIGLA_MEDIDA  = utf8_encode($row['SIGLA_MEDIDA']);
 				$product->CLIENTE  = utf8_encode($row['CLIENTE']);
 				$product->PRECIO  = $row['PRECIO'];
+				$product->PRECIO_MIN  = $row['PRECIO_MIN'];				
 				$product->STOCK = $row['STOCK'];
 				$product->STOCK_COMPROMETIDO  = $row['STOCK_COMPROMETIDO'];
 				$product->STOCK_A_RECEPCIONAR  = $row['STOCK_A_RECEPCIONAR'];
@@ -287,14 +288,16 @@ $app->get('/Products/:idClient', 'authenticate', function ($idClient) use ($app)
 
 $app->post('/Order', 'authenticate', function() use ($app) 
 {
+	$response = array();
+	$entityBody = file_get_contents('php://input');
+	$obj = new Order;
+	$obj = json_decode($entityBody);
+	return saveOrder($obj);	
+});
 
+function saveOrder($obj){
 	try 
 	{
-		$response = array();
-		$entityBody = file_get_contents('php://input');
-		$obj = new Order;
-		$obj = json_decode($entityBody);
-
 		//Almacenamos en base de datos
 		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 		mssql_select_db(DB_NAME, $link);
@@ -422,7 +425,7 @@ $app->post('/Order', 'authenticate', function() use ($app)
 	{
 		return echoResponse(201,$obj);
 	}
-});
+}
 
 
 $app->post('/Budget', 'authenticate', function() use ($app) 
@@ -506,6 +509,84 @@ $app->post('/Budget', 'authenticate', function() use ($app)
 	}
 });
 
+$app->post('/Price', 'authenticate', function() use ($app) 
+{
+	try 
+	{
+		$response = array();
+		$entityBody = file_get_contents('php://input');
+		$obj = new Budget;
+		$obj = json_decode($entityBody);
+		
+		//Almacenamos en base de datos
+		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
+		mssql_select_db(DB_NAME, $link);
+		
+		ini_set('display_errors', 1);
+		ini_set('display_startup_errors', 1);
+		ini_set('mssql.charset', 'utf-8');
+		ini_set('memory_limit', '1024M');
+		error_reporting(E_ALL);
+
+		$lastPriceNumber = getNextOrderNumber();
+		//$obj->state = $lastPriceNumber;
+		//return echoResponse(201, $obj);
+		// ************
+		// CABECERA DEL PEDIDO
+		// ************
+		$query_header = sprintf("insert into APP_ORDER
+		(id, id_user, id_client, filter, state, json, hash) 
+		values 
+		('%s', '%s', '%s','%s', '%s', '%s', '%s')",
+		 $lastPriceNumber, //id de presupuesto
+		 (!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
+		 (!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
+		 "", //filter
+		 $obj->state, //state
+		 $entityBody, //json
+		 "" //hash
+		 );
+
+		 //PRICE
+		 $type = 3;
+		 //Insert autorization
+		$query_autorization = sprintf("insert into APP_AUTORIZATION
+		(id, state, id_user, id_client, cod_vended, order_type, id_order,  json, type) 
+		values 
+		('%s', '%s', '%s','%s','%s','%s','%s', '%s', '%d')",
+		$lastPriceNumber,
+		$obj->state, //state
+		(!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
+		 (!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
+		 (!isset($obj->shoppingCart->client->cod_vended) || is_null($obj->shoppingCart->client->cod_vended))?"":$obj->shoppingCart->client->cod_vended, //cod_vended		 		 
+		 $obj->orderType,
+	     $obj->id,
+		 $entityBody, //json
+		"", //hash
+		$type
+		);
+
+		mssql_query("BEGIN TRAN");
+			mssql_query($query_header) or die(mssql_get_last_message());
+			mssql_query($query_autorization) or die(mssql_get_last_message());
+		mssql_query("COMMIT");		
+
+		//mssql_free_result($res);
+		mssql_close($link);
+		$obj->state = "EN AUTORIZACIÓN";	
+	} 
+	catch (Exception $e) 
+	{
+		$obj->state = $e->getMessage();
+		return echoResponse(201, $obj);
+	} 
+	finally 
+	{
+		return echoResponse(200,$obj);
+	}
+});
+
+/* Admin actualiza autorizacion aprobado o no */
 $app->post('/AutorizationPending', 'authenticate', function() use ($app) 
 {
 	try 
@@ -562,9 +643,15 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 		}
 		
 		// TODO realizar proceso de presupuesto o Orden
-		if($obj->orderType == 'BUDGET' && $obj->state == 'AUTORIZADO'){
-			sendMailsPresupuesto($obj);
-			savePresupuesto($obj);
+		if($obj->state == 'AUTORIZADO'){
+			if($obj->orderType == 'BUDGET'){
+				sendMailsPresupuesto($obj);
+				savePresupuesto($obj);
+			}else {
+				saveOrder($obj);
+				sendMails($obj);
+				//savePresupuesto($obj);
+			}
 		}	
 	} 
 	catch (Exception $e) 
@@ -1009,10 +1096,10 @@ function sendMails($order)
 	$mail->SMTPAuth   = true;                  // enable SMTP authentication
 	$mail->SMTPSecure = "tls";  
 	$mail->Host       = "smtp.gmail.com";//"mail.dbdistribuidora.com"; //;      // SMTP server
-	$mail->Port       = 587;                   // SMTP port
-	$mail->Username   = "dbdistribuiodora.ventasapp@gmail.com";//"ventasapp@dbdistribuidora.com";//"fernando.ariel.tello@gmail.com";//;  // username
-	$mail->Password   = "VentasApp";//"Elefante01"; //; // password
-	$mail->SetFrom('dbdistribuiodora.ventasapp@gmail.com', 'Ventas APP');
+	$mail->Port       = 587;                   // SMTP port	
+	$mail->Username   = "garofolo.leonel@gmail.com";//"ventasapp@dbdistribuidora.com";username
+	$mail->Password   = "30121Daddy";//"VentasApp"; //; // password
+	$mail->SetFrom('garofolo.leonel@gmail.com', 'Ventas APP');
 
 	//Destinatarios
 	/*
@@ -1229,6 +1316,7 @@ function sendMails($order)
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
 		$mail->AddAddress("garofolo.leonel@gmail.com", "Leonel Garofolo");
+		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');
 		//$mail->AddAddress('dsandez@dbdistribuidora.com', 'D Sandez');
 		//$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');		
 		$mail->Send();
@@ -1262,6 +1350,7 @@ function sendMails($order)
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
 		$mail->AddAddress("garofolo.leonel@gmail.com", "Leonel Garofolo");
+		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');
 		/*
 		$mail->AddAddress('imartinez@dbdistribuidora.com', 'I Martinez');
 		$mail->AddAddress('rabdala@dbdistribuidora.com', 'R Abdala');
@@ -1291,7 +1380,7 @@ function sendMails($order)
 		
 		
 		$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
-		$subject = "DB Distribuidora - Pedido Realizado";
+		$subject = "DB Distribuidora - Pedido Realizado (QA - Desestimar)";
 		$body = $intro.$products.$sign; 
 		
 		$mail->CharSet = 'UTF-8';
@@ -1301,6 +1390,8 @@ function sendMails($order)
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
 		$mail->AddAddress('garofolo.leonel@gmail.com', 'Leonel Garofolo');
+		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');		
+		if (!is_null($order->shoppingCart->user->user_email) && isset($order->shoppingCart->user->user_email))
 		/* DESCOMENTAR
 		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');		
 		if (!is_null($order->shoppingCart->user->user_email) && isset($order->shoppingCart->user->user_email))

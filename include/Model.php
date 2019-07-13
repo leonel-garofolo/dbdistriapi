@@ -65,6 +65,7 @@ class Product
     public $SINONIMO;
     public $DESCRIPCION_AD;
     public $PRECIO;
+    public $PRECIO_MIN;    
     public $NRO_LISTA;
 	public $STOCK;
     public $STOCK_COMPROMETIDO;
@@ -87,7 +88,8 @@ class Product
 		$this->STOCK_A_RECEPCIONAR = 0.0;
 		$this->SIGLA_MEDIDA = "";
 		$this->CANT_DECIMAL_MEDIDA = 0;
-		$this->CLIENTE = "";
+        $this->CLIENTE = "";
+        $this->PRECIO_MIN = 0.0;
 	}
 }
 
@@ -189,7 +191,9 @@ class Autorization
     public $state;
     public $date;
 	public $deliveryDate;
-	public $type;
+    public $type;
+    public $order;
+    
 	
 	function __construct() {
        $this->shoppingCart = new ShoppingCart;
@@ -197,7 +201,8 @@ class Autorization
 	   $this->state = "";
 	   $this->date = "";
 	   $this->deliveryDate = "";
-	   $this->type = 6;
+       $this->type = 6;
+       $this->order = new Order;
    }
 }
 
