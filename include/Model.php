@@ -56,6 +56,13 @@ class HistorialProducto
 {
     public $cod_articulo;
     public $descripcion;
+
+    function __construct() 
+	{
+		
+		$this->cod_articulo = "";
+		$this->descripcion = "";		
+    }    
 }
 
 class Product 

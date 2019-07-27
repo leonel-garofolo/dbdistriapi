@@ -84,15 +84,15 @@ $app->post('/AutorizationPending/token/:userName/:userPass/:tokenApi', function(
 			}			
 		}
 		
-		$query_header = sprintf("insert into APP_USER_PROFILE (username, userpass, token) values('%s', '%s', '%s')",
+		$query_header = sprintf("insert into APP_USER_PROFILE (username, userpass, token, update_token) values('%s', '%s', '%s', GETDATE())",
 			$userName, //id user
 			$userPass,
 			$tokenApi
 		);
 		if($exist > 0){
-			$query_header = sprintf("update APP_USER_PROFILE set token = '%s' where username = '%s'",				
+			$query_header = sprintf("update APP_USER_PROFILE set token = '%s', update_token = GETDATE() where username = '%s'",				
 			$tokenApi,
-			$userName //id user
+			$userName //id userd
 			);
 		}
 		mssql_query("BEGIN TRAN");
@@ -172,10 +172,14 @@ $app->get('/Clients', 'authenticate', function ()  use ($app)
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD) or die("Couldn't connect to SQL Server on $myServer. Error: " . mssql_get_last_message());;
 	mssql_select_db(DB_NAME, $link);
 	$queryString = sprintf("SELECT c.*, 
-		cast(STUFF(( SELECT distinct top 10 '| ' + hist.COD_ARTICU + '&' + hist.DESCRIPCION COLLATE Modern_Spanish_CI_AS
-		FROM APP_CLIENTES c_aux
-		left join APP_VIEW_HISTORIAL_CLIENTES hist on hist.COD_CLIENT = c_aux.cod_client COLLATE Modern_Spanish_CI_AS
-		where c_aux.cod_client = c.cod_client FOR XML PATH('') ) , 1, 1, '') as varchar(max)) as hist 
+		cast(STUFF(( 
+		SELECT distinct '|' + gv03.COD_ARTICU + '#' + prod.DESCRIPCION COLLATE Modern_Spanish_CI_AS			
+			from GVA03 gv03 
+			inner join GVA21 gv21 on gv21.NRO_PEDIDO = gv03.NRO_PEDIDO
+			inner join APP_PRODUCTOS prod on prod.COD_ARTICULO = gv03.COD_ARTICU
+			where gv21.COD_CLIENT = c.COD_CLIENT and gv21.FECHA_PEDI >=  DateAdd(MM, -6, GetDate()) 
+			FOR XML PATH('') ) , 1, 1, '') as varchar(max)
+			) as hist 
 	FROM APP_CLIENTES c");
 
 	$query = mssql_query($queryString);
@@ -184,37 +188,45 @@ $app->get('/Clients', 'authenticate', function ()  use ($app)
 	{
 		while ($row = mssql_fetch_assoc($query)) 
 		{
+			try{
+				$cliente = new Client;
+				$cliente->nom_com  = utf8_encode($row['nom_com']);
+				$cliente->cod_client  = utf8_encode($row['cod_client']);
+				$cliente->cod_vended  = utf8_encode($row['cod_vended']);
+				$cliente->nro_lista  = utf8_encode($row['nro_lista']);
+				$cliente->cuit  = utf8_encode($row['cuit']);
+				$cliente->dir_com  = utf8_encode($row['dir_com']);
+				$cliente->e_mail  = utf8_encode($row['e_mail']);
+				$cliente->localidad  = utf8_encode($row['localidad']);
+				$cliente->razon_soci  = utf8_encode($row['razon_soci']);
+				$cliente->telefono_1  = utf8_encode($row['telefono_1']);
+				$cliente->cupo_credi  = utf8_encode($row['cupo_credi']);
+				$cliente->saldo_cc  = utf8_encode($row['saldo_cc']);
+				$cliente->cod_transp  = utf8_encode($row['cod_transp']);
+				$cliente->cond_vta   = $row['cond_vta'];
+				$cliente->id_direccion_entrega = $row['id_direccion_entrega'];
+				$cliente->talonario = $row['talonario'];
+			
+				if($row['hist'] != null){
+					$historialProd = array();
+					$splitArray = explode('|', $row['hist']);				
+					foreach($splitArray as &$sProd){
+						$splitProduct = explode('#', $sProd);
 
-			$cliente = new Client;
-			$cliente->nom_com  = utf8_encode($row['nom_com']);
-			$cliente->cod_client  = utf8_encode($row['cod_client']);
-			$cliente->cod_vended  = utf8_encode($row['cod_vended']);
-			$cliente->nro_lista  = utf8_encode($row['nro_lista']);
-			$cliente->cuit  = utf8_encode($row['cuit']);
-			$cliente->dir_com  = utf8_encode($row['dir_com']);
-			$cliente->e_mail  = utf8_encode($row['e_mail']);
-			$cliente->localidad  = utf8_encode($row['localidad']);
-			$cliente->razon_soci  = utf8_encode($row['razon_soci']);
-			$cliente->telefono_1  = utf8_encode($row['telefono_1']);
-			$cliente->cupo_credi  = utf8_encode($row['cupo_credi']);
-			$cliente->saldo_cc  = utf8_encode($row['saldo_cc']);
-			$cliente->cod_transp  = utf8_encode($row['cod_transp']);
-			$cliente->cond_vta   = $row['cond_vta'];
-			$cliente->id_direccion_entrega = $row['id_direccion_entrega'];
-			$cliente->talonario = $row['talonario'];
-			if($row['hist'] != null){
-				$historialProd = array();
-				$splitArray = explode('|', $row['hist']);
-				foreach($splitArray as &$sProd){
-					$splitProduct = explode('&', $sProd);
-
-					$hist = new HistorialProducto;
-					$hist->cod_articulo = $splitProduct[0];
-					$hist->descripcion = str_replace('&','',$splitProduct[1]);
-					array_push($historialProd, $hist);
-				}
-				$cliente->historial_productos = $historialProd;
-			}				
+						$hist = new HistorialProducto;					
+						$hist->cod_articulo = $splitProduct[0];
+						$hist->descripcion = utf8_encode($splitProduct[1]);
+						array_push($historialProd, $hist);
+					}				
+					$cliente->historial_productos = $historialProd;
+				}	
+			} 
+			catch (Exception $e) 
+			{
+				mssql_free_result($query);
+				mssql_close($link);
+				return echoResponse(200, $e);
+			} 						
 			$clientes[] = $cliente;		
 		}
 		mssql_free_result($query);			
@@ -244,7 +256,7 @@ $app->get('/Products', 'authenticate',   function () use ($app)
 				$product->SIGLA_MEDIDA  = utf8_encode($row['SIGLA_MEDIDA']);
 				$product->CLIENTE  = utf8_encode($row['CLIENTE']);
 				$product->PRECIO  = $row['PRECIO'];
-				$product->PRECIO_MIN  = $row['PRECIO_MIN'];				
+				//$product->PRECIO_MIN  = $row['PRECIO_MIN'];				
 				$product->STOCK = $row['STOCK'];
 				$product->STOCK_COMPROMETIDO  = $row['STOCK_COMPROMETIDO'];
 				$product->STOCK_A_RECEPCIONAR  = $row['STOCK_A_RECEPCIONAR'];
@@ -447,9 +459,7 @@ $app->post('/Budget', 'authenticate', function() use ($app)
 		ini_set('memory_limit', '1024M');
 		error_reporting(E_ALL);
 
-		$lastBudgetNumber = getNextBudgetNumber();
-		//$obj->state = $lastBudgetNumber;
-		//return echoResponse(201, $obj);
+		$lastBudgetNumber = getNextBudgetNumber();		
 		// ************
 		// CABECERA DEL PEDIDO
 		// ************
@@ -472,40 +482,54 @@ $app->post('/Budget', 'authenticate', function() use ($app)
 		}else{
 			$type = 2;
 		}
-		 //Insert autorization
-		$query_autorization = sprintf("insert into APP_AUTORIZATION
-		(id, state, id_user, id_client, cod_vended, order_type, id_order,  json, type) 
-		values 
-		('%s', '%s', '%s','%s','%s','%s','%s', '%s', '%d')",
-		$lastBudgetNumber,
-		$obj->state, //state
-		(!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
-		 (!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
-		 (!isset($obj->shoppingCart->client->cod_vended) || is_null($obj->shoppingCart->client->cod_vended))?"":$obj->shoppingCart->client->cod_vended, //cod_vended		 		 
-		 $obj->orderType,
-	     $obj->id,
-		 $entityBody, //json
-		"", //hash
-		$type
-		);
 
-		mssql_query("BEGIN TRAN");
-			mssql_query($query_header) or die(mssql_get_last_message());
-			mssql_query($query_autorization) or die(mssql_get_last_message());
-		mssql_query("COMMIT");		
 
-		//mssql_free_result($res);
-		mssql_close($link);
-		$obj->state = "EN AUTORIZACIÓN";	
+		if($obj->state == 'en autorización'){
+			//Insert autorization
+			$query_autorization = sprintf("insert into APP_AUTORIZATION
+			(id, state, id_user, id_client, cod_vended, order_type, id_order,  json, type) 
+			values 
+			('%s', '%s', '%s','%s','%s','%s','%s', '%s', '%d')",
+			$lastBudgetNumber,
+			$obj->state, //state
+			(!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
+			(!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
+			(!isset($obj->shoppingCart->client->cod_vended) || is_null($obj->shoppingCart->client->cod_vended))?"":$obj->shoppingCart->client->cod_vended, //cod_vended		 		 
+			$obj->orderType,
+			$obj->id,
+			$entityBody, //json
+			"", //hash
+			$type
+			);
+
+			mssql_query("BEGIN TRAN");
+				mssql_query($query_header) or die(mssql_get_last_message());
+				mssql_query($query_autorization) or die(mssql_get_last_message());
+			mssql_query("COMMIT");		
+
+			//mssql_free_result($res);
+			mssql_close($link);
+			$obj->state = "EN AUTORIZACIÓN";
+		}else{
+			mssql_query("BEGIN TRAN");
+				mssql_query($query_header) or die(mssql_get_last_message());				
+			mssql_query("COMMIT");
+			mssql_close($link);
+						
+			savePresupuesto($obj, $lastBudgetNumber);
+			sendMailsPresupuesto($obj);
+			$obj->state = "ENVIADO";			
+		}						
 	} 
 	catch (Exception $e) 
 	{
-		$obj->state = $e->getMessage();
-		return echoResponse(201, $obj);
+		throw $e;
+		//$obj->state = $e->getMessage();
+		//return echoResponse(202, $obj);
 	} 
 	finally 
 	{
-		return echoResponse(200,$obj);
+		return echoResponse(201,$obj);
 	}
 });
 
@@ -547,9 +571,10 @@ $app->post('/Price', 'authenticate', function() use ($app)
 		 "" //hash
 		 );
 
-		 //PRICE
-		 $type = 3;
-		 //Insert autorization
+		 
+		//PRICE
+		$type = 3;
+		//Insert autorization
 		$query_autorization = sprintf("insert into APP_AUTORIZATION
 		(id, state, id_user, id_client, cod_vended, order_type, id_order,  json, type) 
 		values 
@@ -557,11 +582,11 @@ $app->post('/Price', 'authenticate', function() use ($app)
 		$lastPriceNumber,
 		$obj->state, //state
 		(!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
-		 (!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
-		 (!isset($obj->shoppingCart->client->cod_vended) || is_null($obj->shoppingCart->client->cod_vended))?"":$obj->shoppingCart->client->cod_vended, //cod_vended		 		 
-		 $obj->orderType,
-	     $obj->id,
-		 $entityBody, //json
+			(!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
+			(!isset($obj->shoppingCart->client->cod_vended) || is_null($obj->shoppingCart->client->cod_vended))?"":$obj->shoppingCart->client->cod_vended, //cod_vended		 		 
+			$obj->orderType,
+			$obj->id,
+			$entityBody, //json
 		"", //hash
 		$type
 		);
@@ -570,10 +595,9 @@ $app->post('/Price', 'authenticate', function() use ($app)
 			mssql_query($query_header) or die(mssql_get_last_message());
 			mssql_query($query_autorization) or die(mssql_get_last_message());
 		mssql_query("COMMIT");		
-
-		//mssql_free_result($res);
 		mssql_close($link);
-		$obj->state = "EN AUTORIZACIÓN";	
+		//mssql_free_result($res);
+		$obj->state = "EN AUTORIZACIÓN";		
 	} 
 	catch (Exception $e) 
 	{
@@ -607,7 +631,7 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 		ini_set('memory_limit', '1024M');
 		error_reporting(E_ALL);
 
-		//TODO Obtengo el status actual de la autorizacion, si es PRESUPUESTO o PRECIO
+		//Obtengo el status actual de la autorizacion, si es PRESUPUESTO o PRECIO
 
 		//compruebo si es una confirmacion o alta de autorizacion
 		//UPDATE autorization
@@ -626,9 +650,30 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 		mssql_query("BEGIN TRAN");
 			mssql_query($query_header) or die(mssql_get_last_message());
 		mssql_query("COMMIT");
+
+		$query_budget_id = sprintf("select id from APP_AUTORIZATION		
+				where id_user = '%s' and id_client = '%s' and cod_vended = '%s' and order_type = '%s' and id_order = '%s'",		
+		(!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
+		 (!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
+		 (!isset($obj->shoppingCart->client->cod_vended) || is_null($obj->shoppingCart->client->cod_vended))?"":$obj->shoppingCart->client->cod_vended, //cod_vended		 		 
+		 $obj->orderType,
+	     $obj->id
+		);
+
+
+		$query_budget = mssql_query($query_budget_id);
+		$maxNumber = mssql_fetch_array($query_budget);
+		if ($maxNumber === NULL)
+		{
+			$budgetId = "U0000000000000";
+		}
+		else
+		{
+			$budgetId = $maxNumber[0];
+		}
+
 		//mssql_free_result($res);
 		mssql_close($link);
-
 		// envia notificacion de la situacion de la autorizacion al usuario
 		$to = getToken($obj->shoppingCart->user->name);
 		if($to){
@@ -642,17 +687,17 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 			pushNotification($to, "Autorización de ".$obj->shoppingCart->client->nom_com, $message, $obj);			
 		}
 		
-		// TODO realizar proceso de presupuesto o Orden
+		// realizar proceso de presupuesto o Orden
 		if($obj->state == 'AUTORIZADO'){
-			if($obj->orderType == 'BUDGET'){
+			if($obj->orderType == 'BUDGET'){				
+				savePresupuesto($obj, $budgetId);
 				sendMailsPresupuesto($obj);
-				savePresupuesto($obj);
 			}else {
 				saveOrder($obj);
 				sendMails($obj);
-				//savePresupuesto($obj);
 			}
-		}	
+		}
+		
 	} 
 	catch (Exception $e) 
 	{
@@ -798,6 +843,12 @@ $app->get('/TestDB', function()
 {
 	$lastOrderNumber = getNextOrderNumber() .' '.getCotizacion();	
 	return echoResponse(200, $lastOrderNumber);
+});
+
+$app->get('/TestBudget', function()
+{
+	$lastBudgetNumber = getNextBudgetNumber();	
+	return echoResponse(200, $lastBudgetNumber);
 });
 
 $app->post('/User/changepassword/:userName/:password', 'authenticate',   function($userName, $password) use ($app)
@@ -956,12 +1007,12 @@ function getNextBudgetNumber()
 	//Almacenamos en base de datos
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 	mssql_select_db(DB_NAME, $link);
-	$query = mssql_query('SELECT MAX(id) FROM APP_ORDER');
+	$query = mssql_query('select max(n_cotiz) from GVA08');
 	$maxNumber = mssql_fetch_array($query);
 
 	if ($maxNumber === NULL)
 	{
-		$lastNumber = "B000500000000";
+		$lastNumber = "U0000000000000";
 	}
 	else
 	{
@@ -971,7 +1022,7 @@ function getNextBudgetNumber()
 	$calcNextNumber = substr($lastNumber, -5, 8); // Sacamos sucursal y espacio en blanco
 	$calcNextNumber = $calcNextNumber+1;
 	$suffix = str_pad($calcNextNumber,8,"0",STR_PAD_LEFT);
-	$nextNumber = sprintf("B0005%s", $suffix);
+	$nextNumber = sprintf("U00002%s", $suffix);
 		
 	mssql_free_result($query);
 	return $nextNumber;
@@ -1407,15 +1458,9 @@ function sendMails($order)
 	//#endregion
 }
 
-function savePresupuesto($presupuesto){
-	try 
-	{
-		$response = array();
-		$entityBody = file_get_contents('php://input');
-		$obj = new Order;
-		$obj = json_decode($entityBody);
-
-		//Almacenamos en base de datos
+function savePresupuesto($presupuesto,  $lastBudgetNumber){
+	$response = array();		
+		//Almacenamos en base de datos		
 		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 		mssql_select_db(DB_NAME, $link);
 		
@@ -1423,8 +1468,7 @@ function savePresupuesto($presupuesto){
 		ini_set('display_startup_errors', 1);
 		ini_set('mssql.charset', 'utf-8');
 		ini_set('memory_limit', '1024M');
-		error_reporting(E_ALL);
-
+		error_reporting(E_ALL);		
 
 		//Obtenemos el �ltimo n�mero de pedido
 		$lastOrderNumber = getNextOrderNumber();
@@ -1438,7 +1482,7 @@ function savePresupuesto($presupuesto){
 		$leyenda_5 = "";
 		
 		$resultado = 0;
-		$array = str_split($obj->shoppingCart->comment, 60);
+		$array = str_split($presupuesto->shoppingCart->comment, 60);
 		$resultado = count($array);
 		switch($resultado)
 		{
@@ -1481,24 +1525,25 @@ function savePresupuesto($presupuesto){
 		// ************
 		// CABECERA DEL PRESUPUESTO
 		// ************
-		$query_header = sprintf("insert into GVA08 (cod_client, cod_vended, cond_vta, estado, mon_cte, terminal_ingreso, leyenda_1, leyenda_2, leyenda_3, leyenda_4, leyenda_5, cod_transp, usuario_ingreso, importe ,id_direccion_entrega,cotiz, talonario) 
-		values ('%s', '%s', %d, 2, 1, 'APP','%s','%s','%s','%s','%s','%s','%s',%f,'%d', %f, %d)",
-		 $obj->shoppingCart->client->cod_client, //COD_CLIENT
-		 (!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
-		 $obj->shoppingCart->client->cond_vta, //COND_VTA		 		 
+		$query_header = sprintf("insert into GVA08 (N_COTIZ, cod_client, cod_vended, cond_vta, estado, mon_cte, terminal_ingreso, leyenda_1, leyenda_2, leyenda_3, leyenda_4, leyenda_5, cod_transp, usuario_ingreso, importe ,id_direccion_entrega,cotiz, talonario) 
+		values ('%s','%s', '%s', %d, 2, 1, 'APP','%s','%s','%s','%s','%s','%s','%s',%f,%d, %f, %d)",
+		 $lastBudgetNumber,
+		 $presupuesto->shoppingCart->client->cod_client, //COD_CLIENT
+		 (!isset($presupuesto->shoppingCart->user->id) || is_null($presupuesto->shoppingCart->user->id))?"":$presupuesto->shoppingCart->user->id, //COD_VENDED
+		 $presupuesto->shoppingCart->client->cond_vta, //COND_VTA		 		 
 		 $leyenda_1, //LEYENDA_1
 		 $leyenda_2, //LEYENDA_2
 		 $leyenda_3, //LEYENDA_3
 		 $leyenda_4, //LEYENDA_4
          $leyenda_5, //LEYENDA_5
 		 
-		 (!isset($obj->shoppingCart->client->cod_transp) || is_null($obj->shoppingCart->client->cod_transp))?"":$obj->shoppingCart->client->cod_transp, //COD_TRANSP
-		 $obj->shoppingCart->user->name, //USUARIO_INGRESO
-		 $obj->total,//IMPORTE
+		 (!isset($presupuesto->shoppingCart->client->cod_transp) || is_null($presupuesto->shoppingCart->client->cod_transp))?"":$presupuesto->shoppingCart->client->cod_transp, //COD_TRANSP
+		 $presupuesto->shoppingCart->user->name, //USUARIO_INGRESO
+		 $presupuesto->total,//IMPORTE
 		 
-		 (!isset($obj->shoppingCart->client->id_direccion_entrega) || is_null($obj->shoppingCart->client->id_direccion_entrega))?"114":$obj->shoppingCart->client->id_direccion_entrega, //ID_DIRECCION_ENTREGA
+		 (!isset($presupuesto->shoppingCart->client->id_direccion_entrega) || is_null($presupuesto->shoppingCart->client->id_direccion_entrega))?114:$presupuesto->shoppingCart->client->id_direccion_entrega, //ID_DIRECCION_ENTREGA
 		 $dolar, //COtizacion dolar
-		 $obj->shoppingCart->client->talonario //TALONARIO
+		 $presupuesto->shoppingCart->client->talonario //TALONARIO
 		 );
 		
 		// ************
@@ -1507,38 +1552,38 @@ function savePresupuesto($presupuesto){
 		$nroRenglon = 1;
 		$query_detalle = "";
 		$query_stock = "";
-		foreach ($obj->shoppingCart->shoppingProducts as $producto) 
+		foreach ($presupuesto->shoppingCart->shoppingProducts as $producto) 
 		{
-			$query_detalle .= sprintf("insert into gva09 (COD_ARTICU, CANT_TOTAL, ESTADO, PRECIO, ID_MEDIDA_VENTAS, UNIDAD_MEDIDA_SELECCIONADA, NRO_RENGL, TALONARIO) 
-				VALUES ('%s', '%d', 2, %f, 14, 'P', %d, %d); ", 				
+			$query_detalle .= sprintf("insert into gva09 (N_COTIZ, COD_ARTICU, CANT_TOTAL, ESTADO, PRECIO, ID_MEDIDA_VENTAS, UNIDAD_MEDIDA_SELECCIONADA, NRO_RENGL, TALONARIO) 
+				VALUES ('%s', '%s', %d, 2, %f, 14, 'P', %d, %d)", 
+				$lastBudgetNumber,				
 				$producto->COD_ARTICULO, 
 				$producto->quantity,
 				$producto->PRECIO, 
 				$nroRenglon,
-				$obj->shoppingCart->client->talonario
+				$presupuesto->shoppingCart->client->talonario
 			);
 			$nroRenglon = $nroRenglon+1;			
 
 		}
-
+		
 		mssql_query("BEGIN TRAN");
 			mssql_query($query_header) or die(mssql_get_last_message());
 			mssql_query($query_detalle) or die(mssql_get_last_message());
 		mssql_query("COMMIT");
-
 		//mssql_free_result($res);
 		mssql_close($link);
-		$obj->state = "enviado";
+		/*
+	try 
+	{
+		
 	} 
 	catch (Exception $e) 
 	{
+		throw $e;		
 		$obj->state = "no enviado";
-	} 
-	finally 
-	{
-		return echoResponse(201,$obj);
 	}
-
+	*/
 }
 
 function sendMailsPresupuesto($presupuesto)
