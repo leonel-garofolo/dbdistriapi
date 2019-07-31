@@ -712,8 +712,7 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 		}else if($obj->state == 'AUTORIZADO Y CARGADO'){
 			savePresupuesto($obj, $budgetId);
 			savePriceList($obj);			
-			//sendMailsPresupuesto($obj);
-			
+			sendMailsPresupuesto($obj);
 		}
 		
 	} 
