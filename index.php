@@ -610,6 +610,19 @@ $app->post('/Price', 'authenticate', function() use ($app)
 	}
 });
 
+$app->post('/TestList', 'authenticate', function() use ($app) 
+{
+
+	$response = array();
+	$entityBody = file_get_contents('php://input');
+	$obj = new Autorization;
+	$obj = json_decode($entityBody);
+
+	savePriceList($obj);
+	return echoResponse(201,$obj);
+});
+
+
 /* Admin actualiza autorizacion aprobado o no */
 $app->post('/AutorizationPending', 'authenticate', function() use ($app) 
 {
@@ -696,6 +709,11 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 				saveOrder($obj);
 				sendMails($obj);
 			}
+		}else if($obj->state == 'AUTORIZADO Y CARGADO'){
+			savePresupuesto($obj, $budgetId);
+			savePriceList($obj);			
+			//sendMailsPresupuesto($obj);
+			
 		}
 		
 	} 
@@ -1458,8 +1476,74 @@ function sendMails($order)
 	//#endregion
 }
 
-function savePresupuesto($presupuesto,  $lastBudgetNumber){
+function savePriceList($presupuesto){
 	$response = array();		
+	//Almacenamos en base de datos		
+	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
+	mssql_select_db(DB_NAME, $link);
+	
+	ini_set('display_errors', 1);
+	ini_set('display_startup_errors', 1);
+	ini_set('mssql.charset', 'utf-8');
+	ini_set('memory_limit', '1024M');
+	error_reporting(E_ALL);		
+
+	
+	$priceExist = false;
+	$gvaID = false;
+	foreach ($presupuesto->shoppingCart->shoppingProducts as $producto) 
+	{
+		$query_header = sprintf("select ID_GVA13 from GVA13 where COD_CLIENT = '%s' AND NRO_LISTA = '%s' and COD_ARTICU = '%s'",
+			$presupuesto->shoppingCart->client->cod_client, //COD_CLIENT
+			$presupuesto->shoppingCart->client->nro_lista, //NRO_LISTA
+			$producto->COD_ARTICULO);
+		
+		$query_price_exist = mssql_query($query_header);
+		$idPrice = mssql_fetch_array($query_price_exist);
+		if ($idPrice == NULL)
+		{
+			$priceExist = false;
+			$gvaID = null;
+		}
+		else
+		{
+			$priceExist = true;
+			$gvaID = $idPrice[0];
+		}
+
+		if($priceExist){				
+			// ACTUALIZO LA LISTA DE PRECIO
+			$query_update = sprintf("update GVA13 set COD_CLIENT = '%s', NRO_LISTA = %d, COD_ARTICU = '%s', PRECIO = %f where ID_GVA13 = %d",
+				$presupuesto->shoppingCart->client->cod_client, //COD_CLIENT
+				$producto->NRO_LISTA, //NRO_LISTA
+				$producto->COD_ARTICULO,
+				$producto->PRECIO,
+				$gvaID
+			);
+			mssql_query("BEGIN TRAN");			
+			mssql_query($query_update) or die(mssql_get_last_message());
+			mssql_query("COMMIT");
+		}else{
+			// INSERTO LA LISTA DE PRECIO
+			$query_insert = sprintf("insert into GVA13 (COD_CLIENT, NRO_LISTA, COD_ARTICU, PRECIO) 
+					VALUES ('%s', %d, '%s',%f)", 
+					$presupuesto->shoppingCart->client->cod_client, //COD_CLIENT
+					$producto->NRO_LISTA, //NRO_LISTA
+					$producto->COD_ARTICULO,
+					$producto->PRECIO
+				);
+			mssql_query("BEGIN TRAN");
+			mssql_query($query_insert) or die(mssql_get_last_message());
+			mssql_query("COMMIT");
+		}
+	}
+	mssql_close($link);	
+}
+
+function savePresupuesto($presupuesto,  $lastBudgetNumber){
+	try 
+	{
+		$response = array();		
 		//Almacenamos en base de datos		
 		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 		mssql_select_db(DB_NAME, $link);
@@ -1572,18 +1656,13 @@ function savePresupuesto($presupuesto,  $lastBudgetNumber){
 			mssql_query($query_detalle) or die(mssql_get_last_message());
 		mssql_query("COMMIT");
 		//mssql_free_result($res);
-		mssql_close($link);
-		/*
-	try 
-	{
-		
+		mssql_close($link);			
 	} 
 	catch (Exception $e) 
 	{
 		throw $e;		
 		$obj->state = "no enviado";
 	}
-	*/
 }
 
 function sendMailsPresupuesto($presupuesto)
