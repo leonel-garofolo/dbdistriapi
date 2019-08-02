@@ -256,7 +256,7 @@ $app->get('/Products', 'authenticate',   function () use ($app)
 				$product->SIGLA_MEDIDA  = utf8_encode($row['SIGLA_MEDIDA']);
 				$product->CLIENTE  = utf8_encode($row['CLIENTE']);
 				$product->PRECIO  = $row['PRECIO'];
-				//$product->PRECIO_MIN  = $row['PRECIO_MIN'];				
+				$product->PRECIO_MIN  = $row['PRECIO_MIN'];				
 				$product->STOCK = $row['STOCK'];
 				$product->STOCK_COMPROMETIDO  = $row['STOCK_COMPROMETIDO'];
 				$product->STOCK_A_RECEPCIONAR  = $row['STOCK_A_RECEPCIONAR'];
@@ -516,20 +516,18 @@ $app->post('/Budget', 'authenticate', function() use ($app)
 			mssql_query("COMMIT");
 			mssql_close($link);
 						
-			savePresupuesto($obj, $lastBudgetNumber);
-			sendMailsPresupuesto($obj);
+			savePresupuesto($obj, $lastBudgetNumber);			
 			$obj->state = "ENVIADO";			
-		}						
+		}
 	} 
 	catch (Exception $e) 
 	{
-		throw $e;
-		//$obj->state = $e->getMessage();
-		//return echoResponse(202, $obj);
+		$obj->state = $e->getMessage();
+		return echoResponse(201, $obj);
 	} 
 	finally 
 	{
-		return echoResponse(201,$obj);
+		return echoResponse(200,$obj);
 	}
 });
 
@@ -842,6 +840,23 @@ $app->post('/Mail', 'authenticate', function() use ($app)
 		$obj = new Order;
 		$obj = json_decode($entityBody);
 		sendMails($obj);
+	}
+	catch (Exception $e) 
+	{
+		return echoResponse(400,$e);
+	}
+	
+	return echoResponse(200,$obj);
+});
+
+$app->post('/MailBudget', 'authenticate', function() use ($app) 
+{
+	try 
+	{
+		$entityBody = file_get_contents('php://input');
+		$obj = new Order;
+		$obj = json_decode($entityBody);
+		sendMailsPresupuesto($obj);
 	}
 	catch (Exception $e) 
 	{
@@ -1540,9 +1555,8 @@ function savePriceList($presupuesto){
 }
 
 function savePresupuesto($presupuesto,  $lastBudgetNumber){
-	try 
-	{
-		$response = array();		
+
+	$response = array();		
 		//Almacenamos en base de datos		
 		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 		mssql_select_db(DB_NAME, $link);
@@ -1655,13 +1669,18 @@ function savePresupuesto($presupuesto,  $lastBudgetNumber){
 			mssql_query($query_detalle) or die(mssql_get_last_message());
 		mssql_query("COMMIT");
 		//mssql_free_result($res);
-		mssql_close($link);			
+		mssql_close($link);	
+
+	/*
+	try 
+	{
+				
 	} 
 	catch (Exception $e) 
-	{
-		throw $e;		
+	{			
 		$obj->state = "no enviado";
 	}
+	*/
 }
 
 function sendMailsPresupuesto($presupuesto)
