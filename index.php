@@ -240,6 +240,10 @@ $app->get('/Products', 'authenticate',   function () use ($app)
 	
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 	mssql_select_db(DB_NAME, $link);
+	ini_set('display_errors', 1);
+	ini_set('display_startup_errors', 1);
+	ini_set('mssql.charset', 'utf-8');
+	ini_set('memory_limit', '1024M');
 	$query = mssql_query('SELECT * FROM APP_PRODUCTOS');
 	$products = array();
 	
@@ -275,6 +279,11 @@ $app->get('/Products/:idClient', 'authenticate', function ($idClient) use ($app)
 {
 	
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
+	ini_set('display_errors', 1);
+	ini_set('display_startup_errors', 1);
+	ini_set('mssql.charset', 'utf-8');
+	ini_set('memory_limit', '1024M');
+
 	mssql_select_db(DB_NAME, $link);
 	$query = mssql_query('SELECT * FROM APP_PRODUCTOS');
 	$products = array();
@@ -515,8 +524,10 @@ $app->post('/Budget', 'authenticate', function() use ($app)
 				mssql_query($query_header) or die(mssql_get_last_message());				
 			mssql_query("COMMIT");
 			mssql_close($link);
+			if($obj->shoppingCart->client->cod_client != "-1"){
+				savePresupuesto($obj, $lastBudgetNumber);
+			}			
 						
-			savePresupuesto($obj, $lastBudgetNumber);			
 			$obj->state = "ENVIADO";			
 		}
 	} 
@@ -850,7 +861,7 @@ $app->post('/Mail', 'authenticate', function() use ($app)
 });
 
 $app->post('/MailBudget', 'authenticate', function() use ($app) 
-{
+{	
 	try 
 	{
 		$entityBody = file_get_contents('php://input');
@@ -862,7 +873,6 @@ $app->post('/MailBudget', 'authenticate', function() use ($app)
 	{
 		return echoResponse(400,$e);
 	}
-	
 	return echoResponse(200,$obj);
 });
 
@@ -972,7 +982,7 @@ $app->get('/User/:userName/:password', 'authenticate', function($userName, $pass
 			else
 			{
 				//Buscamos usuario como administrador
-				if ($userName == 'admin')
+				if ($userName == 'admin' || $userName == 'admin2' || $userName == 'admin3')
 				{
 					$user->id = "00";
 					$user->name = "admin";
@@ -1017,7 +1027,7 @@ function getNextOrderNumber()
 
 	if ($maxNumber === NULL)
 	{
-		$lastNumber = " 000500000000";
+		$lastNumber = " 0000500000000";
 	}
 	else
 	{
@@ -1027,7 +1037,8 @@ function getNextOrderNumber()
 	$calcNextNumber = substr($lastNumber, -5, 8); // Sacamos sucursal y espacio en blanco
 	$calcNextNumber = $calcNextNumber+1;
 	$suffix = str_pad($calcNextNumber,8,"0",STR_PAD_LEFT);
-	$nextNumber = sprintf(" 0005%s", $suffix);		
+	$nextNumber = sprintf(" 00005%s", $suffix);
+		
 	mssql_free_result($query);
 	return $nextNumber;
 }
@@ -1086,11 +1097,9 @@ function getCotizacion()
 function echoResponse($status_code, $response) {
 	$app = \Slim\Slim::getInstance();
 	// Http response code
-	$app->status($status_code);
-
+	$app->status($status_code);	
 	// setting response content type to json
-	$app->contentType('application/json');
-
+	$app->contentType('application/json; charset=utf-8');
 	echo json_encode($response);
 }
 
@@ -1179,17 +1188,11 @@ function sendMails($order)
 	$mail->SMTPAuth   = true;                  // enable SMTP authentication
 	$mail->SMTPSecure = "tls";  
 	$mail->Host       = "smtp.gmail.com";//"mail.dbdistribuidora.com"; //;      // SMTP server
-	$mail->Port       = 587;                   // SMTP port	
-	$mail->Username   = "garofolo.leonel@gmail.com";//"ventasapp@dbdistribuidora.com";username
-	$mail->Password   = "30121Daddy";//"VentasApp"; //; // password
-	$mail->SetFrom('garofolo.leonel@gmail.com', 'Ventas APP');
+	$mail->Port       = 587;                   // SMTP port
+	$mail->Username   = "dbdistribuiodora.ventasapp@gmail.com";
+	$mail->Password   = "VentasApp";//"Elefante01"; //; // password
+	$mail->SetFrom('dbdistribuiodora.ventasapp@gmail.com', 'Ventas APP');
 
-	//Destinatarios
-	/*
-	$toAddressLimit = "fernando.ariel.tello@gmail.com";
-    $toAddressStock = "fernando.ariel.tello@gmail.com";
-    $toAddressSpecial = "fernando.ariel.tello@gmail.com";
-	*/
 	$sendSotck = false;
 	$sendLimit = false;
 	$total = 0.00;
@@ -1363,9 +1366,8 @@ function sendMails($order)
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
-		$mail->AddAddress("garofolo.leonel@gmail.com", "Leonel Garofolo");
-		//$mail->AddAddress('gmandado@dbdistribuidora.com', 'G Mandado');
-		//$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');		
+		$mail->AddAddress('gmandado@dbdistribuidora.com', 'G Mandado');
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');		
 		$mail->Send();
 		$mail->ClearAddresses();
 		$mail->ClearCCs();
@@ -1398,10 +1400,8 @@ function sendMails($order)
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
-		$mail->AddAddress("garofolo.leonel@gmail.com", "Leonel Garofolo");
-		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');
-		//$mail->AddAddress('dsandez@dbdistribuidora.com', 'D Sandez');
-		//$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');		
+		$mail->AddAddress('dsandez@dbdistribuidora.com', 'D Sandez');
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');
 		$mail->Send();
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
@@ -1432,15 +1432,11 @@ function sendMails($order)
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
-		$mail->AddAddress("garofolo.leonel@gmail.com", "Leonel Garofolo");
-		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');
-		/*
 		$mail->AddAddress('imartinez@dbdistribuidora.com', 'I Martinez');
 		$mail->AddAddress('rabdala@dbdistribuidora.com', 'R Abdala');
 		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');
 		$mail->AddCC('afigueroa@dbdistribuidora.com', 'Pedidos');
-		$mail->AddCC('lorena@dbdistribuidora.com', 'Pedidos');
-		*/		
+		$mail->AddCC('lorena@dbdistribuidora.com', 'Pedidos');	
 		$mail->Send();
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
@@ -1472,16 +1468,11 @@ function sendMails($order)
 		$mail->ClearAddresses();
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
-		$mail->AddAddress('garofolo.leonel@gmail.com', 'Leonel Garofolo');
-		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');		
-		if (!is_null($order->shoppingCart->user->user_email) && isset($order->shoppingCart->user->user_email))
-		/* DESCOMENTAR
-		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');		
+		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');
 		if (!is_null($order->shoppingCart->user->user_email) && isset($order->shoppingCart->user->user_email))
 		{
 			$mail->AddCC($order->shoppingCart->user->user_email, $order->shoppingCart->user->name);
 		}
-		*/
 		$mail->Send();
 		$mail->ClearAddresses();
 		$mail->ClearCCs();
@@ -1555,8 +1546,9 @@ function savePriceList($presupuesto){
 }
 
 function savePresupuesto($presupuesto,  $lastBudgetNumber){
-
-	$response = array();		
+	try 
+	{
+		$response = array();		
 		//Almacenamos en base de datos		
 		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 		mssql_select_db(DB_NAME, $link);
@@ -1669,18 +1661,12 @@ function savePresupuesto($presupuesto,  $lastBudgetNumber){
 			mssql_query($query_detalle) or die(mssql_get_last_message());
 		mssql_query("COMMIT");
 		//mssql_free_result($res);
-		mssql_close($link);	
-
-	/*
-	try 
-	{
-				
+		mssql_close($link);	  				
 	} 
 	catch (Exception $e) 
 	{			
 		$obj->state = "no enviado";
 	}
-	*/
 }
 
 function sendMailsPresupuesto($presupuesto)
@@ -1698,9 +1684,9 @@ function sendMailsPresupuesto($presupuesto)
 	$mail->SMTPSecure = "tls";  
 	$mail->Host       = "smtp.gmail.com";//"mail.dbdistribuidora.com"; //;      // SMTP server
 	$mail->Port       = 587;                   // SMTP port
-	$mail->Username   = "garofolo.leonel@gmail.com";//"ventasapp@dbdistribuidora.com";//"fernando.ariel.tello@gmail.com";//;  // username
-	$mail->Password   = "30121Daddy";//"Elefante01"; //; // password
-	$mail->SetFrom('garofolo.leonel@gmail.com', 'Ventas APP');
+	$mail->Username   = "dbdistribuiodora.ventasapp@gmail.com";
+	$mail->Password   = "VentasApp";//"Elefante01"; //; // password
+	$mail->SetFrom('dbdistribuiodora.ventasapp@gmail.com', 'Ventas APP');
 	
 	$sendSotck = false;
 	$sendLimit = false;
@@ -1827,21 +1813,24 @@ function sendMailsPresupuesto($presupuesto)
 	
 	// Total
 	// Agregamos IVA
-	$sendLimit = false;
-	$limite = ((($presupuesto->shoppingCart->client->cupo_credi/ $dolar)) - ($presupuesto->shoppingCart->client->saldo_cc/ $dolar));
-	if (($total*1.21) > $limite)
-	{
-		$sendLimit = true;
-	}
-	$productsLimite .= sprintf("<tr " . $styleRow . "><td></td><td></td><td></td><td></td><td><b>TOTAL (U\$S)</b></td><td><b>%.2f + IVA (%.2f)</b></td></tr>", $total, $total*0.21);
-	$productsLimite .= sprintf("<tr " . $styleRow . "><td></td><td></td><td></td><td></td><td><b>L�MITE (U\$S)</b></td><td><b>%.2f</b></td></tr>", $limite);
-	$productsLimite .= sprintf("<tr " . $styleRowSinStock . "><td></td><td></td><td></td><td></td><td><b>EXCESO (U\$S)</b></td><td><b>%.2f</b></td></tr>", ($total*1.21)-$limite);
+	if($presupuesto->shoppingCart->client->cod_client != "-1"){
+		$sendLimit = false;
 
-	 // Observaciones
-	$productsLimite .= sprintf("<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Observaciones</td></tr><tr " . $styleRow . "><td colspan=\"6\">%s</td></tr>", ($presupuesto->shoppingCart->comment=== NULL) ? "Sin observaciones" : $presupuesto->shoppingCart->comment);
-
-
-	$productsLimite .= "</table>";
+		$limite = ((($presupuesto->shoppingCart->client->cupo_credi/ $dolar)) - ($presupuesto->shoppingCart->client->saldo_cc/ $dolar));
+		if (($total*1.21) > $limite)
+		{
+			$sendLimit = true;
+		}
+		$productsLimite .= sprintf("<tr " . $styleRow . "><td></td><td></td><td></td><td></td><td><b>TOTAL (U\$S)</b></td><td><b>%.2f + IVA (%.2f)</b></td></tr>", $total, $total*0.21);
+		$productsLimite .= sprintf("<tr " . $styleRow . "><td></td><td></td><td></td><td></td><td><b>L�MITE (U\$S)</b></td><td><b>%.2f</b></td></tr>", $limite);
+		$productsLimite .= sprintf("<tr " . $styleRowSinStock . "><td></td><td></td><td></td><td></td><td><b>EXCESO (U\$S)</b></td><td><b>%.2f</b></td></tr>", ($total*1.21)-$limite);
+	
+		 // Observaciones
+		$productsLimite .= sprintf("<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Observaciones</td></tr><tr " . $styleRow . "><td colspan=\"6\">%s</td></tr>", ($presupuesto->shoppingCart->comment=== NULL) ? "Sin observaciones" : $presupuesto->shoppingCart->comment);
+	
+	
+		$productsLimite .= "</table>";
+	}	
 	
 	//Alerta de entrega especial.Posibilidad de mail a log�stica
 	//********************************************************
@@ -1866,14 +1855,10 @@ function sendMailsPresupuesto($presupuesto)
 	$mail->ClearAddresses();
 	$mail->ClearCCs();
 	$mail->ClearBCCs();
-	$mail->AddAddress('garofolo.leonel@gmail.com', 'Leonel Garofolo');
-	/* DESCOMENTAR
-	$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');		
-	if (!is_null($presupuesto->shoppingCart->user->user_email) && isset($presupuesto->shoppingCart->user->user_email))
-	{
-		$mail->AddCC($presupuesto->shoppingCart->user->user_email, $presupuesto->shoppingCart->user->name);
-	}
-	*/
+	$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');	
+	$mail->AddAddress('presupuestos@dbdistribuidora.com', 'Presupuestos');	
+	$mail->AddAddress('baudone@dbdistribuidora.com', 'Baudone');	
+	$mail->AddAddress($presupuesto->shoppingCart->client->e_mail, $presupuesto->shoppingCart->client->nom_com);			
 	$mail->Send();
 	$mail->ClearAddresses();
 	$mail->ClearCCs();
