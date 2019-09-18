@@ -25,7 +25,12 @@ require 'libs/Slim/vendor/autoload.php';
 require 'libs/Slim/vendor/slim/slim/Slim/Slim.php';
 \Slim\Slim::registerAutoloader();
   
-$app = new \Slim\Slim(); 
+$app = new \Slim\Slim();
+$app->log->setEnabled(true);
+$app->log->setLevel(\Slim\Log::INFO);
+
+$log = $app->log;
+
 
 $app->get('/auto', function () 
 {
@@ -47,10 +52,10 @@ echoResponse(200, $response);
 });
 
 // install sudo apt-get install php5.6-curl
-$app->get('/TestNotification', function()
+$app->get('/TestNotification/:userName', function($userPass)
 {
 	// token user request
-	$to = getToken('admin');
+	$to = getToken($userPass);
 	$obj = json_decode('{id=1}');
 	$result = pushNotification($to, "Autorización", "Se ha aprovado la autorización de leonel.", $obj);	
 	echo $result;
@@ -697,7 +702,7 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 		//mssql_free_result($res);
 		mssql_close($link);
 		// envia notificacion de la situacion de la autorizacion al usuario
-		$to = getToken($obj->shoppingCart->user->name);
+		$to = getToken($obj->shoppingCart->user->userName);		
 		if($to){
 			$message = "Se ha ".$obj->state." el ";
 			if($obj->orderType == 'BUDGET'){
@@ -718,7 +723,7 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 				saveOrder($obj);
 				sendMails($obj);
 			}
-		}else if($obj->state == 'AUTORIZADO Y CARGADO'){
+		} else if($obj->state == 'AUTORIZADO Y CARGADO'){
 			savePresupuesto($obj, $budgetId);
 			savePriceList($obj);			
 			sendMailsPresupuesto($obj);
@@ -876,8 +881,10 @@ $app->post('/MailBudget', 'authenticate', function() use ($app)
 	return echoResponse(200,$obj);
 });
 
-$app->get('/TestServer', function()
+$app->get('/TestServer', function() use ($app)
 {
+	$request = $app->request;
+	$app->log->info('Request path: ' . $request->getPathInfo());
 	echo "Server OK";
 });
 
@@ -1367,6 +1374,7 @@ function sendMails($order)
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
 		$mail->AddAddress('gmandado@dbdistribuidora.com', 'G Mandado');
+		$mail->AddAddress('analia@dbdistribuidora.com', 'Analia');		
 		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');		
 		$mail->Send();
 		$mail->ClearAddresses();
@@ -1400,7 +1408,7 @@ function sendMails($order)
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
-		$mail->AddAddress('dsandez@dbdistribuidora.com', 'D Sandez');
+		$mail->AddAddress('facturacion@dbdistribuidora.com', 'D Sandez');
 		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');
 		$mail->Send();
 		$mail->ClearAddresses(); 
@@ -1434,9 +1442,10 @@ function sendMails($order)
 		$mail->ClearBCCs();
 		$mail->AddAddress('imartinez@dbdistribuidora.com', 'I Martinez');
 		$mail->AddAddress('rabdala@dbdistribuidora.com', 'R Abdala');
-		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');
-		$mail->AddCC('afigueroa@dbdistribuidora.com', 'Pedidos');
-		$mail->AddCC('lorena@dbdistribuidora.com', 'Pedidos');	
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Presupuesto');
+		$mail->AddCC('afigueroa@dbdistribuidora.com', 'Figueroa');
+		$mail->AddCC('lorena@dbdistribuidora.com', 'Lorena');		
+		$mail->AddCC('cyntia@dbdistribuidora.com', 'Cyntia');		
 		$mail->Send();
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
@@ -1703,7 +1712,7 @@ function sendMailsPresupuesto($presupuesto)
 	
 	//*************************************************
 	//*************************************************
-	// TABLA PEDIDOS 
+	// TABLA PRESUPUESTOS 
 	//*************************************************
 	//*************************************************
 	
@@ -1834,7 +1843,7 @@ function sendMailsPresupuesto($presupuesto)
 	
 	//Alerta de entrega especial.Posibilidad de mail a log�stica
 	//********************************************************
-	//El metodo que envia debe contener lo siguiente
+	//El metodo que envia debe contener lo sigCategoryiente
 	if ($presupuesto->shoppingCart->user->name === $presupuesto->shoppingCart->client->nom_com)
 	{
 		$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName,  $presupuesto->shoppingCart->client->nom_com);
@@ -1843,8 +1852,121 @@ function sendMailsPresupuesto($presupuesto)
 	{
 		$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto para el cliente <b>%s</b>. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
 	}
+
+	//Alerta por facturas vencidas y l�mite de cr�dito.Posibilidad de mail autom�tico a cr�ditos.  
+	//********************************************************
+	
+	if ($sendLimit)
+	{
+		if ($presupuesto->shoppingCart->user->name === $presupuesto->shoppingCart->client->nom_com)
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto. El saldo de dicho cliente ha sido superado. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->client->nom_com);
+		}
+		else
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto para el cliente <b>%s</b>. El saldo de dicho cliente ha sido superado. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
+		}
+		
+		$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
+		$subject = "DB Distribuidora - Presupuesto - L�mite de saldo superado";
+		$body = $intro . $productsLimite . $sign;
+
+		$mail->CharSet = 'UTF-8';
+		$mail->Subject = $subject;
+		$mail->MsgHTML($body);
+		$mail->ClearAddresses(); 
+		$mail->ClearCCs();
+		$mail->ClearBCCs();
+		$mail->AddAddress('gmandado@dbdistribuidora.com', 'G Mandado');
+		$mail->AddAddress('analia@dbdistribuidora.com', 'Analia');
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Presupuesto');		
+		$mail->Send();
+		$mail->ClearAddresses();
+		$mail->ClearCCs();
+		$mail->ClearBCCs();		
+	}
 	
 	
+	//Alerta de entrega especial.Posibilidad de mail a log�stica
+	//********************************************************
+	//El metodo que envia debe contener lo siguiente
+	if ($presupuesto->shoppingCart->specialShipping)
+	{
+		if ($presupuesto->shoppingCart->user->name === $presupuesto->shoppingCart->client->nom_com)
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto con entrega especial. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName,  $presupuesto->shoppingCart->client->nom_com);
+		}
+		else
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto con entrega especial para el cliente <b>%s</b>. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
+		}
+		
+		
+		$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
+		$subject = "DB Distribuidora - presupuesto - Entrega Especial";
+		$body = $intro.$products.$sign; 
+		
+		$mail->CharSet = 'UTF-8';
+		$mail->Subject = $subject;
+		$mail->MsgHTML($body);
+		$mail->ClearAddresses(); 
+		$mail->ClearCCs();
+		$mail->ClearBCCs();
+		$mail->AddAddress('facturacion@dbdistribuidora.com', 'D Sandez');
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Presupuesto');
+		$mail->Send();
+		$mail->ClearAddresses(); 
+		$mail->ClearCCs();
+		$mail->ClearBCCs();
+	}
+	
+	//Alerta por falta de stock. Posibilidad de mail autom�tico a compras.
+	//********************************************************
+	if ($sendSotck)
+	{
+		if ($presupuesto->shoppingCart->user->name === $presupuesto->shoppingCart->client->nom_com)
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto. No hay stock suficiente para alguno de los productos solicitados. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->client->nom_com);
+		}
+		else
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto para el cliente <b>%s</b>. No hay stock suficiente para alguno de los productos solicitados. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
+		}
+		
+		$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
+		$subject = "DB Distribuidora - Presupuesto - Falta de stock";
+		$body = $intro . $productsSinStock . $sign;
+
+		$mail->CharSet = 'UTF-8';
+
+		$mail->Subject = $subject;
+		$mail->MsgHTML($body);
+		$mail->ClearAddresses(); 
+		$mail->ClearCCs();
+		$mail->ClearBCCs();
+		$mail->AddAddress('imartinez@dbdistribuidora.com', 'I Martinez');
+		$mail->AddAddress('rabdala@dbdistribuidora.com', 'R Abdala');
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Presupuesto');
+		$mail->AddCC('afigueroa@dbdistribuidora.com', 'Figueroa');
+		$mail->AddCC('lorena@dbdistribuidora.com', 'Lorena');
+		$mail->AddCC('cyntia@dbdistribuidora.com', 'Cyntia');			
+		$mail->Send();
+		$mail->ClearAddresses(); 
+		$mail->ClearCCs();
+		$mail->ClearBCCs();
+	}
+	
+	//Alerta de entrega especial.Posibilidad de mail a log�stica
+	//********************************************************
+	//El metodo que envia debe contener lo siguiente
+	if ($presupuesto->shoppingCart->user->name === $presupuesto->shoppingCart->client->nom_com)
+	{
+		$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName,  $presupuesto->shoppingCart->client->nom_com);
+	}
+	else
+	{
+		$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto para el cliente <b>%s</b>. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
+	}		
 	$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
 	$subject = "DB Distribuidora - Presupuesto Realizado";
 	$body = $intro.$products.$sign; 
@@ -1855,15 +1977,22 @@ function sendMailsPresupuesto($presupuesto)
 	$mail->ClearAddresses();
 	$mail->ClearCCs();
 	$mail->ClearBCCs();
-	$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');	
-	$mail->AddAddress('presupuestos@dbdistribuidora.com', 'Presupuestos');	
-	$mail->AddAddress('baudone@dbdistribuidora.com', 'Baudone');	
-	$mail->AddAddress($presupuesto->shoppingCart->client->e_mail, $presupuesto->shoppingCart->client->nom_com);			
+	$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');
+	$mail->AddAddress('presupuestos@dbdistribuidora.com', 'Presupuestos');
+	//CLIENTE
+	if (!is_null($presupuesto->shoppingCart->client->e_mail) && isset($presupuesto->shoppingCart->client->e_mail))
+	{
+		$mail->AddAddress($presupuesto->shoppingCart->client->e_mail, $presupuesto->shoppingCart->client->nom_com);			
+	}		
+	//VENDEDOR
+	if (!is_null($presupuesto->shoppingCart->user->user_email) && isset($presupuesto->shoppingCart->user->user_email))
+	{
+		$mail->AddCC($presupuesto->shoppingCart->user->user_email, $presupuesto->shoppingCart->user->name);
+	}
 	$mail->Send();
 	$mail->ClearAddresses();
 	$mail->ClearCCs();
-	$mail->ClearBCCs();	
-	//#endregion
+	$mail->ClearBCCs();		
 }
 function getStringValue($input)
 {
