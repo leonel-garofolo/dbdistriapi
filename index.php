@@ -766,6 +766,44 @@ $app->get('/AutorizationPending/', 'authenticate', function () use ($app)
 	}	
 });
 
+/* TODO ESTIMAR PARA HACER
+$app->get('/User', 'authenticate', function ()  use ($app)
+{
+	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
+	mssql_select_db(DB_NAME, $link);
+	
+	if ($hierarchy != 'ALL')
+	{
+		$query = mssql_query(sprintf("SELECT id, name, hierarchy, inactive  FROM APP_CATEGORIA  WHERE hierarchy = '%s'", $hierarchy));
+	}
+	else
+	{
+		$query = mssql_query(sprintf("SELECT id, name, hierarchy, inactive  FROM APP_CATEGORIA", $hierarchy));
+	}
+
+	$categories = array();
+	if (!is_null($query))
+	{
+		while ($row = mssql_fetch_assoc($query)) 
+		{
+
+			$user = new User;
+			$user->id  = utf8_encode($row['id']);
+			$user->name  = utf8_encode($row['name']);
+			$user->hierarchy  = utf8_encode($row['hierarchy']);
+			$user->inactive  = $row['inactive'];
+			
+			$categories[] = $category;
+		}
+	
+		mssql_free_result($query);
+		mssql_close($link);
+		
+		echoResponse(200, $categories);
+	}	
+});
+*/
+
 $app->get('/Setup', 'authenticate', function ()  use ($app)
 {
 	$configurations = array();
