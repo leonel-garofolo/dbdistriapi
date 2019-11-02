@@ -25,7 +25,13 @@ require 'libs/Slim/vendor/autoload.php';
 require 'libs/Slim/vendor/slim/slim/Slim/Slim.php';
 \Slim\Slim::registerAutoloader();
   
-$app = new \Slim\Slim(); 
+$app = new \Slim\Slim();
+$app->log->setEnabled(true);
+$app->log->setLevel(\Slim\Log::INFO);
+
+$log = $app->log;
+/* services */
+include_once 'services/users.php';
 
 $app->get('/auto', function () 
 {
@@ -47,13 +53,19 @@ echoResponse(200, $response);
 });
 
 // install sudo apt-get install php5.6-curl
-$app->get('/TestNotification', function()
+$app->get('/TestNotification/:userName', function($userPass)
 {
 	// token user request
-	$to = getToken('admin');
+	$to = getToken($userPass);
 	$obj = json_decode('{id=1}');
 	$result = pushNotification($to, "Autorización", "Se ha aprovado la autorización de leonel.", $obj);	
 	echo $result;
+});
+
+// install sudo apt-get install php5.6-curl
+$app->get('/users/data/:userName', function($userName)
+{
+	echo getUserData($userName);	
 });
 
 $app->post('/AutorizationPending/token/:userName/:userPass/:tokenApi', function($userName, $userPass, $tokenApi) use ($app)
@@ -84,15 +96,15 @@ $app->post('/AutorizationPending/token/:userName/:userPass/:tokenApi', function(
 			}			
 		}
 		
-		$query_header = sprintf("insert into APP_USER_PROFILE (username, userpass, token) values('%s', '%s', '%s')",
+		$query_header = sprintf("insert into APP_USER_PROFILE (username, userpass, token, update_token) values('%s', '%s', '%s', GETDATE())",
 			$userName, //id user
 			$userPass,
 			$tokenApi
 		);
 		if($exist > 0){
-			$query_header = sprintf("update APP_USER_PROFILE set token = '%s' where username = '%s'",				
+			$query_header = sprintf("update APP_USER_PROFILE set token = '%s', update_token = GETDATE() where username = '%s'",				
 			$tokenApi,
-			$userName //id user
+			$userName //id userd
 			);
 		}
 		mssql_query("BEGIN TRAN");
@@ -172,10 +184,14 @@ $app->get('/Clients', 'authenticate', function ()  use ($app)
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD) or die("Couldn't connect to SQL Server on $myServer. Error: " . mssql_get_last_message());;
 	mssql_select_db(DB_NAME, $link);
 	$queryString = sprintf("SELECT c.*, 
-		cast(STUFF(( SELECT distinct top 10 '| ' + hist.COD_ARTICU + '&' + hist.DESCRIPCION COLLATE Modern_Spanish_CI_AS
-		FROM APP_CLIENTES c_aux
-		left join APP_VIEW_HISTORIAL_CLIENTES hist on hist.COD_CLIENT = c_aux.cod_client COLLATE Modern_Spanish_CI_AS
-		where c_aux.cod_client = c.cod_client FOR XML PATH('') ) , 1, 1, '') as varchar(max)) as hist 
+		cast(STUFF(( 
+		SELECT distinct '|' + gv03.COD_ARTICU + '#' + prod.DESCRIPCION COLLATE Modern_Spanish_CI_AS			
+			from GVA03 gv03 
+			inner join GVA21 gv21 on gv21.NRO_PEDIDO = gv03.NRO_PEDIDO
+			inner join APP_PRODUCTOS prod on prod.COD_ARTICULO = gv03.COD_ARTICU
+			where gv21.COD_CLIENT = c.COD_CLIENT and gv21.FECHA_PEDI >=  DateAdd(MM, -6, GetDate()) 
+			FOR XML PATH('') ) , 1, 1, '') as varchar(max)
+			) as hist 
 	FROM APP_CLIENTES c");
 
 	$query = mssql_query($queryString);
@@ -184,37 +200,45 @@ $app->get('/Clients', 'authenticate', function ()  use ($app)
 	{
 		while ($row = mssql_fetch_assoc($query)) 
 		{
+			try{
+				$cliente = new Client;
+				$cliente->nom_com  = utf8_encode($row['nom_com']);
+				$cliente->cod_client  = utf8_encode($row['cod_client']);
+				$cliente->cod_vended  = utf8_encode($row['cod_vended']);
+				$cliente->nro_lista  = utf8_encode($row['nro_lista']);
+				$cliente->cuit  = utf8_encode($row['cuit']);
+				$cliente->dir_com  = utf8_encode($row['dir_com']);
+				$cliente->e_mail  = utf8_encode($row['e_mail']);
+				$cliente->localidad  = utf8_encode($row['localidad']);
+				$cliente->razon_soci  = utf8_encode($row['razon_soci']);
+				$cliente->telefono_1  = utf8_encode($row['telefono_1']);
+				$cliente->cupo_credi  = utf8_encode($row['cupo_credi']);
+				$cliente->saldo_cc  = utf8_encode($row['saldo_cc']);
+				$cliente->cod_transp  = utf8_encode($row['cod_transp']);
+				$cliente->cond_vta   = $row['cond_vta'];
+				$cliente->id_direccion_entrega = $row['id_direccion_entrega'];
+				$cliente->talonario = $row['talonario'];
+			
+				if($row['hist'] != null){
+					$historialProd = array();
+					$splitArray = explode('|', $row['hist']);				
+					foreach($splitArray as &$sProd){
+						$splitProduct = explode('#', $sProd);
 
-			$cliente = new Client;
-			$cliente->nom_com  = utf8_encode($row['nom_com']);
-			$cliente->cod_client  = utf8_encode($row['cod_client']);
-			$cliente->cod_vended  = utf8_encode($row['cod_vended']);
-			$cliente->nro_lista  = utf8_encode($row['nro_lista']);
-			$cliente->cuit  = utf8_encode($row['cuit']);
-			$cliente->dir_com  = utf8_encode($row['dir_com']);
-			$cliente->e_mail  = utf8_encode($row['e_mail']);
-			$cliente->localidad  = utf8_encode($row['localidad']);
-			$cliente->razon_soci  = utf8_encode($row['razon_soci']);
-			$cliente->telefono_1  = utf8_encode($row['telefono_1']);
-			$cliente->cupo_credi  = utf8_encode($row['cupo_credi']);
-			$cliente->saldo_cc  = utf8_encode($row['saldo_cc']);
-			$cliente->cod_transp  = utf8_encode($row['cod_transp']);
-			$cliente->cond_vta   = $row['cond_vta'];
-			$cliente->id_direccion_entrega = $row['id_direccion_entrega'];
-			$cliente->talonario = $row['talonario'];
-			if($row['hist'] != null){
-				$historialProd = array();
-				$splitArray = explode('|', $row['hist']);
-				foreach($splitArray as &$sProd){
-					$splitProduct = explode('&', $sProd);
-
-					$hist = new HistorialProducto;
-					$hist->cod_articulo = $splitProduct[0];
-					$hist->descripcion = str_replace('&','',$splitProduct[1]);
-					array_push($historialProd, $hist);
-				}
-				$cliente->historial_productos = $historialProd;
-			}				
+						$hist = new HistorialProducto;					
+						$hist->cod_articulo = $splitProduct[0];
+						$hist->descripcion = utf8_encode($splitProduct[1]);
+						array_push($historialProd, $hist);
+					}				
+					$cliente->historial_productos = $historialProd;
+				}	
+			} 
+			catch (Exception $e) 
+			{
+				mssql_free_result($query);
+				mssql_close($link);
+				return echoResponse(200, $e);
+			} 						
 			$clientes[] = $cliente;		
 		}
 		mssql_free_result($query);			
@@ -228,6 +252,10 @@ $app->get('/Products', 'authenticate',   function () use ($app)
 	
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 	mssql_select_db(DB_NAME, $link);
+	ini_set('display_errors', 1);
+	ini_set('display_startup_errors', 1);
+	ini_set('mssql.charset', 'utf-8');
+	ini_set('memory_limit', '1024M');
 	$query = mssql_query('SELECT * FROM APP_PRODUCTOS');
 	$products = array();
 	
@@ -244,6 +272,7 @@ $app->get('/Products', 'authenticate',   function () use ($app)
 				$product->SIGLA_MEDIDA  = utf8_encode($row['SIGLA_MEDIDA']);
 				$product->CLIENTE  = utf8_encode($row['CLIENTE']);
 				$product->PRECIO  = $row['PRECIO'];
+				$product->PRECIO_MIN  = $row['PRECIO_MIN'];				
 				$product->STOCK = $row['STOCK'];
 				$product->STOCK_COMPROMETIDO  = $row['STOCK_COMPROMETIDO'];
 				$product->STOCK_A_RECEPCIONAR  = $row['STOCK_A_RECEPCIONAR'];
@@ -262,6 +291,11 @@ $app->get('/Products/:idClient', 'authenticate', function ($idClient) use ($app)
 {
 	
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
+	ini_set('display_errors', 1);
+	ini_set('display_startup_errors', 1);
+	ini_set('mssql.charset', 'utf-8');
+	ini_set('memory_limit', '1024M');
+
 	mssql_select_db(DB_NAME, $link);
 	$query = mssql_query('SELECT * FROM APP_PRODUCTOS');
 	$products = array();
@@ -287,14 +321,16 @@ $app->get('/Products/:idClient', 'authenticate', function ($idClient) use ($app)
 
 $app->post('/Order', 'authenticate', function() use ($app) 
 {
+	$response = array();
+	$entityBody = file_get_contents('php://input');
+	$obj = new Order;
+	$obj = json_decode($entityBody);
+	return saveOrder($obj);	
+});
 
+function saveOrder($obj){
 	try 
 	{
-		$response = array();
-		$entityBody = file_get_contents('php://input');
-		$obj = new Order;
-		$obj = json_decode($entityBody);
-
 		//Almacenamos en base de datos
 		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 		mssql_select_db(DB_NAME, $link);
@@ -422,7 +458,7 @@ $app->post('/Order', 'authenticate', function() use ($app)
 	{
 		return echoResponse(201,$obj);
 	}
-});
+}
 
 
 $app->post('/Budget', 'authenticate', function() use ($app) 
@@ -444,9 +480,7 @@ $app->post('/Budget', 'authenticate', function() use ($app)
 		ini_set('memory_limit', '1024M');
 		error_reporting(E_ALL);
 
-		$lastBudgetNumber = getNextBudgetNumber();
-		//$obj->state = $lastBudgetNumber;
-		//return echoResponse(201, $obj);
+		$lastBudgetNumber = getNextBudgetNumber();		
 		// ************
 		// CABECERA DEL PEDIDO
 		// ************
@@ -469,31 +503,45 @@ $app->post('/Budget', 'authenticate', function() use ($app)
 		}else{
 			$type = 2;
 		}
-		 //Insert autorization
-		$query_autorization = sprintf("insert into APP_AUTORIZATION
-		(id, state, id_user, id_client, cod_vended, order_type, id_order,  json, type) 
-		values 
-		('%s', '%s', '%s','%s','%s','%s','%s', '%s', '%d')",
-		$lastBudgetNumber,
-		$obj->state, //state
-		(!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
-		 (!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
-		 (!isset($obj->shoppingCart->client->cod_vended) || is_null($obj->shoppingCart->client->cod_vended))?"":$obj->shoppingCart->client->cod_vended, //cod_vended		 		 
-		 $obj->orderType,
-	     $obj->id,
-		 $entityBody, //json
-		"", //hash
-		$type
-		);
 
-		mssql_query("BEGIN TRAN");
-			mssql_query($query_header) or die(mssql_get_last_message());
-			mssql_query($query_autorization) or die(mssql_get_last_message());
-		mssql_query("COMMIT");		
 
-		//mssql_free_result($res);
-		mssql_close($link);
-		$obj->state = "EN AUTORIZACIÓN";	
+		if($obj->state == 'en autorización'){
+			//Insert autorization
+			$query_autorization = sprintf("insert into APP_AUTORIZATION
+			(id, state, id_user, id_client, cod_vended, order_type, id_order,  json, type) 
+			values 
+			('%s', '%s', '%s','%s','%s','%s','%s', '%s', '%d')",
+			$lastBudgetNumber,
+			$obj->state, //state
+			(!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
+			(!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
+			(!isset($obj->shoppingCart->client->cod_vended) || is_null($obj->shoppingCart->client->cod_vended))?"":$obj->shoppingCart->client->cod_vended, //cod_vended		 		 
+			$obj->orderType,
+			$obj->id,
+			$entityBody, //json
+			"", //hash
+			$type
+			);
+
+			mssql_query("BEGIN TRAN");
+				mssql_query($query_header) or die(mssql_get_last_message());
+				mssql_query($query_autorization) or die(mssql_get_last_message());
+			mssql_query("COMMIT");		
+
+			//mssql_free_result($res);
+			mssql_close($link);
+			$obj->state = "EN AUTORIZACIÓN";
+		}else{
+			mssql_query("BEGIN TRAN");
+				mssql_query($query_header) or die(mssql_get_last_message());				
+			mssql_query("COMMIT");
+			mssql_close($link);
+			if($obj->shoppingCart->client->cod_client != "-1"){
+				savePresupuesto($obj, $lastBudgetNumber);
+			}			
+						
+			$obj->state = "ENVIADO";			
+		}
 	} 
 	catch (Exception $e) 
 	{
@@ -506,6 +554,97 @@ $app->post('/Budget', 'authenticate', function() use ($app)
 	}
 });
 
+$app->post('/Price', 'authenticate', function() use ($app) 
+{
+	try 
+	{
+		$response = array();
+		$entityBody = file_get_contents('php://input');
+		$obj = new Budget;
+		$obj = json_decode($entityBody);
+		
+		//Almacenamos en base de datos
+		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
+		mssql_select_db(DB_NAME, $link);
+		
+		ini_set('display_errors', 1);
+		ini_set('display_startup_errors', 1);
+		ini_set('mssql.charset', 'utf-8');
+		ini_set('memory_limit', '1024M');
+		error_reporting(E_ALL);
+
+		$lastPriceNumber = getNextOrderNumber();
+		//$obj->state = $lastPriceNumber;
+		//return echoResponse(201, $obj);
+		// ************
+		// CABECERA DEL PEDIDO
+		// ************
+		$query_header = sprintf("insert into APP_ORDER
+		(id, id_user, id_client, filter, state, json, hash) 
+		values 
+		('%s', '%s', '%s','%s', '%s', '%s', '%s')",
+		 $lastPriceNumber, //id de presupuesto
+		 (!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
+		 (!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
+		 "", //filter
+		 $obj->state, //state
+		 $entityBody, //json
+		 "" //hash
+		 );
+
+		 
+		//PRICE
+		$type = 3;
+		//Insert autorization
+		$query_autorization = sprintf("insert into APP_AUTORIZATION
+		(id, state, id_user, id_client, cod_vended, order_type, id_order,  json, type) 
+		values 
+		('%s', '%s', '%s','%s','%s','%s','%s', '%s', '%d')",
+		$lastPriceNumber,
+		$obj->state, //state
+		(!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
+			(!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
+			(!isset($obj->shoppingCart->client->cod_vended) || is_null($obj->shoppingCart->client->cod_vended))?"":$obj->shoppingCart->client->cod_vended, //cod_vended		 		 
+			$obj->orderType,
+			$obj->id,
+			$entityBody, //json
+		"", //hash
+		$type
+		);
+
+		mssql_query("BEGIN TRAN");
+			mssql_query($query_header) or die(mssql_get_last_message());
+			mssql_query($query_autorization) or die(mssql_get_last_message());
+		mssql_query("COMMIT");		
+		mssql_close($link);
+		//mssql_free_result($res);
+		$obj->state = "EN AUTORIZACIÓN";		
+	} 
+	catch (Exception $e) 
+	{
+		$obj->state = $e->getMessage();
+		return echoResponse(201, $obj);
+	} 
+	finally 
+	{
+		return echoResponse(200,$obj);
+	}
+});
+
+$app->post('/TestList', 'authenticate', function() use ($app) 
+{
+
+	$response = array();
+	$entityBody = file_get_contents('php://input');
+	$obj = new Autorization;
+	$obj = json_decode($entityBody);
+
+	savePriceList($obj);
+	return echoResponse(201,$obj);
+});
+
+
+/* Admin actualiza autorizacion aprobado o no */
 $app->post('/AutorizationPending', 'authenticate', function() use ($app) 
 {
 	try 
@@ -526,7 +665,7 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 		ini_set('memory_limit', '1024M');
 		error_reporting(E_ALL);
 
-		//TODO Obtengo el status actual de la autorizacion, si es PRESUPUESTO o PRECIO
+		//Obtengo el status actual de la autorizacion, si es PRESUPUESTO o PRECIO
 
 		//compruebo si es una confirmacion o alta de autorizacion
 		//UPDATE autorization
@@ -545,11 +684,32 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 		mssql_query("BEGIN TRAN");
 			mssql_query($query_header) or die(mssql_get_last_message());
 		mssql_query("COMMIT");
+
+		$query_budget_id = sprintf("select id from APP_AUTORIZATION		
+				where id_user = '%s' and id_client = '%s' and cod_vended = '%s' and order_type = '%s' and id_order = '%s'",		
+		(!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
+		 (!isset($obj->shoppingCart->client->cod_client) || is_null($obj->shoppingCart->client->cod_client))?"":$obj->shoppingCart->client->cod_client, //cliente		 
+		 (!isset($obj->shoppingCart->client->cod_vended) || is_null($obj->shoppingCart->client->cod_vended))?"":$obj->shoppingCart->client->cod_vended, //cod_vended		 		 
+		 $obj->orderType,
+	     $obj->id
+		);
+
+
+		$query_budget = mssql_query($query_budget_id);
+		$maxNumber = mssql_fetch_array($query_budget);
+		if ($maxNumber === NULL)
+		{
+			$budgetId = "U0000000000000";
+		}
+		else
+		{
+			$budgetId = $maxNumber[0];
+		}
+
 		//mssql_free_result($res);
 		mssql_close($link);
-
 		// envia notificacion de la situacion de la autorizacion al usuario
-		$to = getToken($obj->shoppingCart->user->name);
+		$to = getToken($obj->shoppingCart->user->userName);		
 		if($to){
 			$message = "Se ha ".$obj->state." el ";
 			if($obj->orderType == 'BUDGET'){
@@ -561,11 +721,21 @@ $app->post('/AutorizationPending', 'authenticate', function() use ($app)
 			pushNotification($to, "Autorización de ".$obj->shoppingCart->client->nom_com, $message, $obj);			
 		}
 		
-		// TODO realizar proceso de presupuesto o Orden
-		if($obj->orderType == 'BUDGET' && $obj->state == 'AUTORIZADO'){
+		// realizar proceso de presupuesto o Orden
+		if($obj->state == 'AUTORIZADO'){
+			if($obj->orderType == 'BUDGET'){				
+				savePresupuesto($obj, $budgetId);
+				sendMailsPresupuesto($obj);
+			}else {
+				saveOrder($obj);
+				sendMails($obj);
+			}
+		} else if($obj->state == 'AUTORIZADO Y CARGADO'){
+			savePresupuesto($obj, $budgetId);
+			savePriceList($obj);			
 			sendMailsPresupuesto($obj);
-			savePresupuesto($obj);
-		}	
+		}
+		
 	} 
 	catch (Exception $e) 
 	{
@@ -602,6 +772,44 @@ $app->get('/AutorizationPending/', 'authenticate', function () use ($app)
 		echoResponse(200, $autorizations);
 	}	
 });
+
+/* TODO ESTIMAR PARA HACER
+$app->get('/User', 'authenticate', function ()  use ($app)
+{
+	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
+	mssql_select_db(DB_NAME, $link);
+	
+	if ($hierarchy != 'ALL')
+	{
+		$query = mssql_query(sprintf("SELECT id, name, hierarchy, inactive  FROM APP_CATEGORIA  WHERE hierarchy = '%s'", $hierarchy));
+	}
+	else
+	{
+		$query = mssql_query(sprintf("SELECT id, name, hierarchy, inactive  FROM APP_CATEGORIA", $hierarchy));
+	}
+
+	$categories = array();
+	if (!is_null($query))
+	{
+		while ($row = mssql_fetch_assoc($query)) 
+		{
+
+			$user = new User;
+			$user->id  = utf8_encode($row['id']);
+			$user->name  = utf8_encode($row['name']);
+			$user->hierarchy  = utf8_encode($row['hierarchy']);
+			$user->inactive  = $row['inactive'];
+			
+			$categories[] = $category;
+		}
+	
+		mssql_free_result($query);
+		mssql_close($link);
+		
+		echoResponse(200, $categories);
+	}	
+});
+*/
 
 $app->get('/Setup', 'authenticate', function ()  use ($app)
 {
@@ -702,8 +910,26 @@ $app->post('/Mail', 'authenticate', function() use ($app)
 	return echoResponse(200,$obj);
 });
 
-$app->get('/TestServer', function()
+$app->post('/MailBudget', 'authenticate', function() use ($app) 
+{	
+	try 
+	{
+		$entityBody = file_get_contents('php://input');
+		$obj = new Order;
+		$obj = json_decode($entityBody);
+		sendMailsPresupuesto($obj);
+	}
+	catch (Exception $e) 
+	{
+		return echoResponse(400,$e);
+	}
+	return echoResponse(200,$obj);
+});
+
+$app->get('/TestServer', function() use ($app)
 {
+	$request = $app->request;
+	$app->log->info('Request path: ' . $request->getPathInfo());
 	echo "Server OK";
 });
 
@@ -711,6 +937,12 @@ $app->get('/TestDB', function()
 {
 	$lastOrderNumber = getNextOrderNumber() .' '.getCotizacion();	
 	return echoResponse(200, $lastOrderNumber);
+});
+
+$app->get('/TestBudget', function()
+{
+	$lastBudgetNumber = getNextBudgetNumber();	
+	return echoResponse(200, $lastBudgetNumber);
 });
 
 $app->post('/User/changepassword/:userName/:password', 'authenticate',   function($userName, $password) use ($app)
@@ -802,7 +1034,7 @@ $app->get('/User/:userName/:password', 'authenticate', function($userName, $pass
 			else
 			{
 				//Buscamos usuario como administrador
-				if ($userName == 'admin')
+				if ($userName == 'admin' || $userName == 'admin2' || $userName == 'admin3')
 				{
 					$user->id = "00";
 					$user->name = "admin";
@@ -847,7 +1079,7 @@ function getNextOrderNumber()
 
 	if ($maxNumber === NULL)
 	{
-		$lastNumber = " 000500000000";
+		$lastNumber = " 0000500000000";
 	}
 	else
 	{
@@ -857,7 +1089,8 @@ function getNextOrderNumber()
 	$calcNextNumber = substr($lastNumber, -5, 8); // Sacamos sucursal y espacio en blanco
 	$calcNextNumber = $calcNextNumber+1;
 	$suffix = str_pad($calcNextNumber,8,"0",STR_PAD_LEFT);
-	$nextNumber = sprintf(" 0005%s", $suffix);		
+	$nextNumber = sprintf(" 00005%s", $suffix);
+		
 	mssql_free_result($query);
 	return $nextNumber;
 }
@@ -869,12 +1102,12 @@ function getNextBudgetNumber()
 	//Almacenamos en base de datos
 	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 	mssql_select_db(DB_NAME, $link);
-	$query = mssql_query('SELECT MAX(id) FROM APP_ORDER');
+	$query = mssql_query('select max(n_cotiz) from GVA08');
 	$maxNumber = mssql_fetch_array($query);
 
 	if ($maxNumber === NULL)
 	{
-		$lastNumber = "B000500000000";
+		$lastNumber = "U0000000000000";
 	}
 	else
 	{
@@ -884,7 +1117,7 @@ function getNextBudgetNumber()
 	$calcNextNumber = substr($lastNumber, -5, 8); // Sacamos sucursal y espacio en blanco
 	$calcNextNumber = $calcNextNumber+1;
 	$suffix = str_pad($calcNextNumber,8,"0",STR_PAD_LEFT);
-	$nextNumber = sprintf("B0005%s", $suffix);
+	$nextNumber = sprintf("U00002%s", $suffix);
 		
 	mssql_free_result($query);
 	return $nextNumber;
@@ -916,11 +1149,9 @@ function getCotizacion()
 function echoResponse($status_code, $response) {
 	$app = \Slim\Slim::getInstance();
 	// Http response code
-	$app->status($status_code);
-
+	$app->status($status_code);	
 	// setting response content type to json
-	$app->contentType('application/json');
-
+	$app->contentType('application/json; charset=utf-8');
 	echo json_encode($response);
 }
 
@@ -1010,16 +1241,10 @@ function sendMails($order)
 	$mail->SMTPSecure = "tls";  
 	$mail->Host       = "smtp.gmail.com";//"mail.dbdistribuidora.com"; //;      // SMTP server
 	$mail->Port       = 587;                   // SMTP port
-	$mail->Username   = "dbdistribuiodora.ventasapp@gmail.com";//"ventasapp@dbdistribuidora.com";//"fernando.ariel.tello@gmail.com";//;  // username
+	$mail->Username   = "dbdistribuiodora.ventasapp@gmail.com";
 	$mail->Password   = "VentasApp";//"Elefante01"; //; // password
 	$mail->SetFrom('dbdistribuiodora.ventasapp@gmail.com', 'Ventas APP');
 
-	//Destinatarios
-	/*
-	$toAddressLimit = "fernando.ariel.tello@gmail.com";
-    $toAddressStock = "fernando.ariel.tello@gmail.com";
-    $toAddressSpecial = "fernando.ariel.tello@gmail.com";
-	*/
 	$sendSotck = false;
 	$sendLimit = false;
 	$total = 0.00;
@@ -1193,9 +1418,9 @@ function sendMails($order)
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
-		$mail->AddAddress("garofolo.leonel@gmail.com", "Leonel Garofolo");
-		//$mail->AddAddress('gmandado@dbdistribuidora.com', 'G Mandado');
-		//$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');		
+		$mail->AddAddress('gmandado@dbdistribuidora.com', 'G Mandado');
+		$mail->AddAddress('analia@dbdistribuidora.com', 'Analia');		
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');		
 		$mail->Send();
 		$mail->ClearAddresses();
 		$mail->ClearCCs();
@@ -1228,9 +1453,8 @@ function sendMails($order)
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
-		$mail->AddAddress("garofolo.leonel@gmail.com", "Leonel Garofolo");
-		//$mail->AddAddress('dsandez@dbdistribuidora.com', 'D Sandez');
-		//$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');		
+		$mail->AddAddress('facturacion@dbdistribuidora.com', 'D Sandez');
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');
 		$mail->Send();
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
@@ -1261,14 +1485,12 @@ function sendMails($order)
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
-		$mail->AddAddress("garofolo.leonel@gmail.com", "Leonel Garofolo");
-		/*
 		$mail->AddAddress('imartinez@dbdistribuidora.com', 'I Martinez');
 		$mail->AddAddress('rabdala@dbdistribuidora.com', 'R Abdala');
-		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Pedidos');
-		$mail->AddCC('afigueroa@dbdistribuidora.com', 'Pedidos');
-		$mail->AddCC('lorena@dbdistribuidora.com', 'Pedidos');
-		*/		
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Presupuesto');
+		$mail->AddCC('afigueroa@dbdistribuidora.com', 'Figueroa');
+		$mail->AddCC('lorena@dbdistribuidora.com', 'Lorena');		
+		$mail->AddCC('cyntia@dbdistribuidora.com', 'Cyntia');		
 		$mail->Send();
 		$mail->ClearAddresses(); 
 		$mail->ClearCCs();
@@ -1291,7 +1513,7 @@ function sendMails($order)
 		
 		
 		$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
-		$subject = "DB Distribuidora - Pedido Realizado";
+		$subject = "DB Distribuidora - Pedido Realizado (QA - Desestimar)";
 		$body = $intro.$products.$sign; 
 		
 		$mail->CharSet = 'UTF-8';
@@ -1300,14 +1522,11 @@ function sendMails($order)
 		$mail->ClearAddresses();
 		$mail->ClearCCs();
 		$mail->ClearBCCs();
-		$mail->AddAddress('garofolo.leonel@gmail.com', 'Leonel Garofolo');
-		/* DESCOMENTAR
-		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');		
+		$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');
 		if (!is_null($order->shoppingCart->user->user_email) && isset($order->shoppingCart->user->user_email))
 		{
 			$mail->AddCC($order->shoppingCart->user->user_email, $order->shoppingCart->user->name);
 		}
-		*/
 		$mail->Send();
 		$mail->ClearAddresses();
 		$mail->ClearCCs();
@@ -1316,15 +1535,75 @@ function sendMails($order)
 	//#endregion
 }
 
-function savePresupuesto($presupuesto){
+function savePriceList($presupuesto){
+	$response = array();		
+	//Almacenamos en base de datos		
+	$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
+	mssql_select_db(DB_NAME, $link);
+	
+	ini_set('display_errors', 1);
+	ini_set('display_startup_errors', 1);
+	ini_set('mssql.charset', 'utf-8');
+	ini_set('memory_limit', '1024M');
+	error_reporting(E_ALL);		
+
+	
+	$priceExist = false;
+	$gvaID = false;
+	foreach ($presupuesto->shoppingCart->shoppingProducts as $producto) 
+	{
+		$query_header = sprintf("select ID_GVA13 from GVA13 where COD_CLIENT = '%s' AND NRO_LISTA = '%s' and COD_ARTICU = '%s'",
+			$presupuesto->shoppingCart->client->cod_client, //COD_CLIENT
+			$presupuesto->shoppingCart->client->nro_lista, //NRO_LISTA
+			$producto->COD_ARTICULO);
+		
+		$query_price_exist = mssql_query($query_header);
+		$idPrice = mssql_fetch_array($query_price_exist);
+		if ($idPrice == NULL)
+		{
+			$priceExist = false;
+			$gvaID = null;
+		}
+		else
+		{
+			$priceExist = true;
+			$gvaID = $idPrice[0];
+		}
+
+		if($priceExist){				
+			// ACTUALIZO LA LISTA DE PRECIO
+			$query_update = sprintf("update GVA13 set COD_CLIENT = '%s', NRO_LISTA = %d, COD_ARTICU = '%s', PRECIO = %f where ID_GVA13 = %d",
+				$presupuesto->shoppingCart->client->cod_client, //COD_CLIENT
+				$producto->NRO_LISTA, //NRO_LISTA
+				$producto->COD_ARTICULO,
+				$producto->PRECIO,
+				$gvaID
+			);
+			mssql_query("BEGIN TRAN");			
+			mssql_query($query_update) or die(mssql_get_last_message());
+			mssql_query("COMMIT");
+		}else{
+			// INSERTO LA LISTA DE PRECIO
+			$query_insert = sprintf("insert into GVA13 (COD_CLIENT, NRO_LISTA, COD_ARTICU, PRECIO) 
+					VALUES ('%s', %d, '%s',%f)", 
+					$presupuesto->shoppingCart->client->cod_client, //COD_CLIENT
+					$producto->NRO_LISTA, //NRO_LISTA
+					$producto->COD_ARTICULO,
+					$producto->PRECIO
+				);
+			mssql_query("BEGIN TRAN");
+			mssql_query($query_insert) or die(mssql_get_last_message());
+			mssql_query("COMMIT");
+		}
+	}
+	mssql_close($link);	
+}
+
+function savePresupuesto($presupuesto,  $lastBudgetNumber){
 	try 
 	{
-		$response = array();
-		$entityBody = file_get_contents('php://input');
-		$obj = new Order;
-		$obj = json_decode($entityBody);
-
-		//Almacenamos en base de datos
+		$response = array();		
+		//Almacenamos en base de datos		
 		$link = mssql_connect(DB_HOST, DB_USERNAME, DB_PASSWORD);
 		mssql_select_db(DB_NAME, $link);
 		
@@ -1332,8 +1611,7 @@ function savePresupuesto($presupuesto){
 		ini_set('display_startup_errors', 1);
 		ini_set('mssql.charset', 'utf-8');
 		ini_set('memory_limit', '1024M');
-		error_reporting(E_ALL);
-
+		error_reporting(E_ALL);		
 
 		//Obtenemos el �ltimo n�mero de pedido
 		$lastOrderNumber = getNextOrderNumber();
@@ -1347,7 +1625,7 @@ function savePresupuesto($presupuesto){
 		$leyenda_5 = "";
 		
 		$resultado = 0;
-		$array = str_split($obj->shoppingCart->comment, 60);
+		$array = str_split($presupuesto->shoppingCart->comment, 60);
 		$resultado = count($array);
 		switch($resultado)
 		{
@@ -1390,24 +1668,25 @@ function savePresupuesto($presupuesto){
 		// ************
 		// CABECERA DEL PRESUPUESTO
 		// ************
-		$query_header = sprintf("insert into GVA08 (cod_client, cod_vended, cond_vta, estado, mon_cte, terminal_ingreso, leyenda_1, leyenda_2, leyenda_3, leyenda_4, leyenda_5, cod_transp, usuario_ingreso, importe ,id_direccion_entrega,cotiz, talonario) 
-		values ('%s', '%s', %d, 2, 1, 'APP','%s','%s','%s','%s','%s','%s','%s',%f,'%d', %f, %d)",
-		 $obj->shoppingCart->client->cod_client, //COD_CLIENT
-		 (!isset($obj->shoppingCart->user->id) || is_null($obj->shoppingCart->user->id))?"":$obj->shoppingCart->user->id, //COD_VENDED
-		 $obj->shoppingCart->client->cond_vta, //COND_VTA		 		 
+		$query_header = sprintf("insert into GVA08 (N_COTIZ, cod_client, cod_vended, cond_vta, estado, mon_cte, terminal_ingreso, leyenda_1, leyenda_2, leyenda_3, leyenda_4, leyenda_5, cod_transp, usuario_ingreso, importe ,id_direccion_entrega,cotiz, talonario) 
+		values ('%s','%s', '%s', %d, 2, 1, 'APP','%s','%s','%s','%s','%s','%s','%s',%f,%d, %f, %d)",
+		 $lastBudgetNumber,
+		 $presupuesto->shoppingCart->client->cod_client, //COD_CLIENT
+		 (!isset($presupuesto->shoppingCart->user->id) || is_null($presupuesto->shoppingCart->user->id))?"":$presupuesto->shoppingCart->user->id, //COD_VENDED
+		 $presupuesto->shoppingCart->client->cond_vta, //COND_VTA		 		 
 		 $leyenda_1, //LEYENDA_1
 		 $leyenda_2, //LEYENDA_2
 		 $leyenda_3, //LEYENDA_3
 		 $leyenda_4, //LEYENDA_4
          $leyenda_5, //LEYENDA_5
 		 
-		 (!isset($obj->shoppingCart->client->cod_transp) || is_null($obj->shoppingCart->client->cod_transp))?"":$obj->shoppingCart->client->cod_transp, //COD_TRANSP
-		 $obj->shoppingCart->user->name, //USUARIO_INGRESO
-		 $obj->total,//IMPORTE
+		 (!isset($presupuesto->shoppingCart->client->cod_transp) || is_null($presupuesto->shoppingCart->client->cod_transp))?"":$presupuesto->shoppingCart->client->cod_transp, //COD_TRANSP
+		 $presupuesto->shoppingCart->user->name, //USUARIO_INGRESO
+		 $presupuesto->total,//IMPORTE
 		 
-		 (!isset($obj->shoppingCart->client->id_direccion_entrega) || is_null($obj->shoppingCart->client->id_direccion_entrega))?"114":$obj->shoppingCart->client->id_direccion_entrega, //ID_DIRECCION_ENTREGA
+		 (!isset($presupuesto->shoppingCart->client->id_direccion_entrega) || is_null($presupuesto->shoppingCart->client->id_direccion_entrega))?114:$presupuesto->shoppingCart->client->id_direccion_entrega, //ID_DIRECCION_ENTREGA
 		 $dolar, //COtizacion dolar
-		 $obj->shoppingCart->client->talonario //TALONARIO
+		 $presupuesto->shoppingCart->client->talonario //TALONARIO
 		 );
 		
 		// ************
@@ -1416,38 +1695,32 @@ function savePresupuesto($presupuesto){
 		$nroRenglon = 1;
 		$query_detalle = "";
 		$query_stock = "";
-		foreach ($obj->shoppingCart->shoppingProducts as $producto) 
+		foreach ($presupuesto->shoppingCart->shoppingProducts as $producto) 
 		{
-			$query_detalle .= sprintf("insert into gva09 (COD_ARTICU, CANT_TOTAL, ESTADO, PRECIO, ID_MEDIDA_VENTAS, UNIDAD_MEDIDA_SELECCIONADA, NRO_RENGL, TALONARIO) 
-				VALUES ('%s', '%d', 2, %f, 14, 'P', %d, %d); ", 				
+			$query_detalle .= sprintf("insert into gva09 (N_COTIZ, COD_ARTICU, CANT_TOTAL, ESTADO, PRECIO, ID_MEDIDA_VENTAS, UNIDAD_MEDIDA_SELECCIONADA, NRO_RENGL, TALONARIO) 
+				VALUES ('%s', '%s', %d, 2, %f, 14, 'P', %d, %d)", 
+				$lastBudgetNumber,				
 				$producto->COD_ARTICULO, 
 				$producto->quantity,
 				$producto->PRECIO, 
 				$nroRenglon,
-				$obj->shoppingCart->client->talonario
+				$presupuesto->shoppingCart->client->talonario
 			);
 			$nroRenglon = $nroRenglon+1;			
 
 		}
-
+		
 		mssql_query("BEGIN TRAN");
 			mssql_query($query_header) or die(mssql_get_last_message());
 			mssql_query($query_detalle) or die(mssql_get_last_message());
 		mssql_query("COMMIT");
-
 		//mssql_free_result($res);
-		mssql_close($link);
-		$obj->state = "enviado";
+		mssql_close($link);	  				
 	} 
 	catch (Exception $e) 
-	{
+	{			
 		$obj->state = "no enviado";
-	} 
-	finally 
-	{
-		return echoResponse(201,$obj);
 	}
-
 }
 
 function sendMailsPresupuesto($presupuesto)
@@ -1465,9 +1738,9 @@ function sendMailsPresupuesto($presupuesto)
 	$mail->SMTPSecure = "tls";  
 	$mail->Host       = "smtp.gmail.com";//"mail.dbdistribuidora.com"; //;      // SMTP server
 	$mail->Port       = 587;                   // SMTP port
-	$mail->Username   = "garofolo.leonel@gmail.com";//"ventasapp@dbdistribuidora.com";//"fernando.ariel.tello@gmail.com";//;  // username
-	$mail->Password   = "30121Daddy";//"Elefante01"; //; // password
-	$mail->SetFrom('garofolo.leonel@gmail.com', 'Ventas APP');
+	$mail->Username   = "dbdistribuiodora.ventasapp@gmail.com";
+	$mail->Password   = "VentasApp";//"Elefante01"; //; // password
+	$mail->SetFrom('dbdistribuiodora.ventasapp@gmail.com', 'Ventas APP');
 	
 	$sendSotck = false;
 	$sendLimit = false;
@@ -1484,7 +1757,7 @@ function sendMailsPresupuesto($presupuesto)
 	
 	//*************************************************
 	//*************************************************
-	// TABLA PEDIDOS 
+	// TABLA PRESUPUESTOS 
 	//*************************************************
 	//*************************************************
 	
@@ -1594,21 +1867,139 @@ function sendMailsPresupuesto($presupuesto)
 	
 	// Total
 	// Agregamos IVA
-	$sendLimit = false;
-	$limite = ((($presupuesto->shoppingCart->client->cupo_credi/ $dolar)) - ($presupuesto->shoppingCart->client->saldo_cc/ $dolar));
-	if (($total*1.21) > $limite)
+	if($presupuesto->shoppingCart->client->cod_client != "-1"){
+		$sendLimit = false;
+
+		$limite = ((($presupuesto->shoppingCart->client->cupo_credi/ $dolar)) - ($presupuesto->shoppingCart->client->saldo_cc/ $dolar));
+		if (($total*1.21) > $limite)
+		{
+			$sendLimit = true;
+		}
+		$productsLimite .= sprintf("<tr " . $styleRow . "><td></td><td></td><td></td><td></td><td><b>TOTAL (U\$S)</b></td><td><b>%.2f + IVA (%.2f)</b></td></tr>", $total, $total*0.21);
+		$productsLimite .= sprintf("<tr " . $styleRow . "><td></td><td></td><td></td><td></td><td><b>L�MITE (U\$S)</b></td><td><b>%.2f</b></td></tr>", $limite);
+		$productsLimite .= sprintf("<tr " . $styleRowSinStock . "><td></td><td></td><td></td><td></td><td><b>EXCESO (U\$S)</b></td><td><b>%.2f</b></td></tr>", ($total*1.21)-$limite);
+	
+		 // Observaciones
+		$productsLimite .= sprintf("<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Observaciones</td></tr><tr " . $styleRow . "><td colspan=\"6\">%s</td></tr>", ($presupuesto->shoppingCart->comment=== NULL) ? "Sin observaciones" : $presupuesto->shoppingCart->comment);
+	
+	
+		$productsLimite .= "</table>";
+	}	
+	
+	//Alerta de entrega especial.Posibilidad de mail a log�stica
+	//********************************************************
+	//El metodo que envia debe contener lo sigCategoryiente
+	if ($presupuesto->shoppingCart->user->name === $presupuesto->shoppingCart->client->nom_com)
 	{
-		$sendLimit = true;
+		$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName,  $presupuesto->shoppingCart->client->nom_com);
 	}
-	$productsLimite .= sprintf("<tr " . $styleRow . "><td></td><td></td><td></td><td></td><td><b>TOTAL (U\$S)</b></td><td><b>%.2f + IVA (%.2f)</b></td></tr>", $total, $total*0.21);
-	$productsLimite .= sprintf("<tr " . $styleRow . "><td></td><td></td><td></td><td></td><td><b>L�MITE (U\$S)</b></td><td><b>%.2f</b></td></tr>", $limite);
-	$productsLimite .= sprintf("<tr " . $styleRowSinStock . "><td></td><td></td><td></td><td></td><td><b>EXCESO (U\$S)</b></td><td><b>%.2f</b></td></tr>", ($total*1.21)-$limite);
+	else
+	{
+		$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto para el cliente <b>%s</b>. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
+	}
 
-	 // Observaciones
-	$productsLimite .= sprintf("<tr " . $styleRow . "><td colspan=\"6\" " . $styleBackgroundHeader . ">Observaciones</td></tr><tr " . $styleRow . "><td colspan=\"6\">%s</td></tr>", ($presupuesto->shoppingCart->comment=== NULL) ? "Sin observaciones" : $presupuesto->shoppingCart->comment);
+	//Alerta por facturas vencidas y l�mite de cr�dito.Posibilidad de mail autom�tico a cr�ditos.  
+	//********************************************************
+	
+	if ($sendLimit)
+	{
+		if ($presupuesto->shoppingCart->user->name === $presupuesto->shoppingCart->client->nom_com)
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto. El saldo de dicho cliente ha sido superado. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->client->nom_com);
+		}
+		else
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto para el cliente <b>%s</b>. El saldo de dicho cliente ha sido superado. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
+		}
+		
+		$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
+		$subject = "DB Distribuidora - Presupuesto - L�mite de saldo superado";
+		$body = $intro . $productsLimite . $sign;
 
+		$mail->CharSet = 'UTF-8';
+		$mail->Subject = $subject;
+		$mail->MsgHTML($body);
+		$mail->ClearAddresses(); 
+		$mail->ClearCCs();
+		$mail->ClearBCCs();
+		$mail->AddAddress('gmandado@dbdistribuidora.com', 'G Mandado');
+		$mail->AddAddress('analia@dbdistribuidora.com', 'Analia');
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Presupuesto');		
+		$mail->Send();
+		$mail->ClearAddresses();
+		$mail->ClearCCs();
+		$mail->ClearBCCs();		
+	}
+	
+	
+	//Alerta de entrega especial.Posibilidad de mail a log�stica
+	//********************************************************
+	//El metodo que envia debe contener lo siguiente
+	if ($presupuesto->shoppingCart->specialShipping)
+	{
+		if ($presupuesto->shoppingCart->user->name === $presupuesto->shoppingCart->client->nom_com)
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto con entrega especial. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName,  $presupuesto->shoppingCart->client->nom_com);
+		}
+		else
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto con entrega especial para el cliente <b>%s</b>. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
+		}
+		
+		
+		$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
+		$subject = "DB Distribuidora - presupuesto - Entrega Especial";
+		$body = $intro.$products.$sign; 
+		
+		$mail->CharSet = 'UTF-8';
+		$mail->Subject = $subject;
+		$mail->MsgHTML($body);
+		$mail->ClearAddresses(); 
+		$mail->ClearCCs();
+		$mail->ClearBCCs();
+		$mail->AddAddress('facturacion@dbdistribuidora.com', 'D Sandez');
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Presupuesto');
+		$mail->Send();
+		$mail->ClearAddresses(); 
+		$mail->ClearCCs();
+		$mail->ClearBCCs();
+	}
+	
+	//Alerta por falta de stock. Posibilidad de mail autom�tico a compras.
+	//********************************************************
+	if ($sendSotck)
+	{
+		if ($presupuesto->shoppingCart->user->name === $presupuesto->shoppingCart->client->nom_com)
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto. No hay stock suficiente para alguno de los productos solicitados. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->client->nom_com);
+		}
+		else
+		{
+			$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto para el cliente <b>%s</b>. No hay stock suficiente para alguno de los productos solicitados. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
+		}
+		
+		$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
+		$subject = "DB Distribuidora - Presupuesto - Falta de stock";
+		$body = $intro . $productsSinStock . $sign;
 
-	$productsLimite .= "</table>";
+		$mail->CharSet = 'UTF-8';
+
+		$mail->Subject = $subject;
+		$mail->MsgHTML($body);
+		$mail->ClearAddresses(); 
+		$mail->ClearCCs();
+		$mail->ClearBCCs();
+		$mail->AddAddress('imartinez@dbdistribuidora.com', 'I Martinez');
+		$mail->AddAddress('rabdala@dbdistribuidora.com', 'R Abdala');
+		$mail->AddCC('ventasapp@dbdistribuidora.com', 'Presupuesto');
+		$mail->AddCC('afigueroa@dbdistribuidora.com', 'Figueroa');
+		$mail->AddCC('lorena@dbdistribuidora.com', 'Lorena');
+		$mail->AddCC('cyntia@dbdistribuidora.com', 'Cyntia');			
+		$mail->Send();
+		$mail->ClearAddresses(); 
+		$mail->ClearCCs();
+		$mail->ClearBCCs();
+	}
 	
 	//Alerta de entrega especial.Posibilidad de mail a log�stica
 	//********************************************************
@@ -1620,9 +2011,7 @@ function sendMailsPresupuesto($presupuesto)
 	else
 	{
 		$intro = sprintf("<br/>    El %s <b>%s</b> ha realizado un presupuesto para el cliente <b>%s</b>. A continuaci�n se describen los detalles del mismo:<br/><br/>", $presupuesto->shoppingCart->user->rolName, $presupuesto->shoppingCart->user->name, $presupuesto->shoppingCart->client->nom_com);
-	}
-	
-	
+	}		
 	$sign = "<br/>DB Distribuidora Argentina S.A.<br/>Francisco N. Laprida 5052, <br/>Villa Martelli, Gran Buenos Aires, Argentina";
 	$subject = "DB Distribuidora - Presupuesto Realizado";
 	$body = $intro.$products.$sign; 
@@ -1633,19 +2022,22 @@ function sendMailsPresupuesto($presupuesto)
 	$mail->ClearAddresses();
 	$mail->ClearCCs();
 	$mail->ClearBCCs();
-	$mail->AddAddress('garofolo.leonel@gmail.com', 'Leonel Garofolo');
-	/* DESCOMENTAR
-	$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');		
+	$mail->AddAddress('dcolla@dbdistribuidora.com', 'Daniel Colla');
+	$mail->AddAddress('presupuestos@dbdistribuidora.com', 'Presupuestos');
+	//CLIENTE
+	if (!is_null($presupuesto->shoppingCart->client->e_mail) && isset($presupuesto->shoppingCart->client->e_mail))
+	{
+		$mail->AddAddress($presupuesto->shoppingCart->client->e_mail, $presupuesto->shoppingCart->client->nom_com);			
+	}		
+	//VENDEDOR
 	if (!is_null($presupuesto->shoppingCart->user->user_email) && isset($presupuesto->shoppingCart->user->user_email))
 	{
 		$mail->AddCC($presupuesto->shoppingCart->user->user_email, $presupuesto->shoppingCart->user->name);
 	}
-	*/
 	$mail->Send();
 	$mail->ClearAddresses();
 	$mail->ClearCCs();
-	$mail->ClearBCCs();	
-	//#endregion
+	$mail->ClearBCCs();		
 }
 function getStringValue($input)
 {
