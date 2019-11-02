@@ -30,7 +30,8 @@ $app->log->setEnabled(true);
 $app->log->setLevel(\Slim\Log::INFO);
 
 $log = $app->log;
-
+/* services */
+include_once 'services/users.php';
 
 $app->get('/auto', function () 
 {
@@ -59,6 +60,12 @@ $app->get('/TestNotification/:userName', function($userPass)
 	$obj = json_decode('{id=1}');
 	$result = pushNotification($to, "Autorización", "Se ha aprovado la autorización de leonel.", $obj);	
 	echo $result;
+});
+
+// install sudo apt-get install php5.6-curl
+$app->get('/users/data/:userName', function($userName)
+{
+	echo getUserData($userName);	
 });
 
 $app->post('/AutorizationPending/token/:userName/:userPass/:tokenApi', function($userName, $userPass, $tokenApi) use ($app)

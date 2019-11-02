@@ -3,9 +3,9 @@
 //TEST
 
 define('DB_USERNAME', 'sa');
-define('DB_PASSWORD', 'AcquaLis123');
-define('DB_HOST', '192.168.0.10\SQLEXPRESS');
-define('DB_NAME', 'DB_2012');
+define('DB_PASSWORD', 'Axoft1988');
+define('DB_HOST', '190.210.196.128');
+define('DB_NAME', 'ZZ_PRUEBAS_DB_');
 
 /*
 define('DB_USERNAME', 'sa');
