@@ -919,7 +919,7 @@ $app->post('/MailBudget', 'authenticate', function() use ($app)
 		$obj = json_decode($entityBody);
 		sendMailsPresupuesto($obj);
 	}
-	catch (Exception $e) 
+	catch (Exception $e)  
 	{
 		return echoResponse(400,$e);
 	}
@@ -1263,12 +1263,15 @@ function sendMails($order)
 	// TABLA PEDIDOS 
 	//*************************************************
 	//*************************************************
-	
+	$dateDelivery = new DateTime($order->deliveryDate);
+	$dateDelivery->modify('+1 day');
+
+
 	$products = "<table style=\"font-family: arial, sans-serif;border-collapse: collapse;width: 100%;\">";
 	//Cliente y Vendedro
 	$products .= "<tr " . $styleRow . "><td colspan=\"2\" " . $styleBackgroundHeader . ">Datos del cliente</td><td colspan=\"2\" " . $styleBackgroundHeader . ">Datos del Vendedor</td><td colspan=\"2\" " . $styleBackgroundHeader . ">Despacho</td></tr>";
 	$products .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\"><b>Nombre:</b> %s</td><td colspan=\"2\" ><b>Fecha Creaci�n:</b> %s</td></tr>", $order->shoppingCart->client->nom_com, $order->shoppingCart->user->name, $order->date);
-	$products .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Direcci�n:</b> %s</td><td colspan=\"2\"><b>Tipo:</b> %s</td><td colspan=\"2\" ><b>Fecha Entrega:</b> %s</td></tr>", $order->shoppingCart->client->dir_com, $order->shoppingCart->user->rolName, $order->deliveryDate);
+	$products .= sprintf("<tr " . $styleRow . "><td colspan=\"2\"><b>Direcci�n:</b> %s</td><td colspan=\"2\"><b>Tipo:</b> %s</td><td colspan=\"2\" ><b>Fecha Entrega:</b> %s</td></tr>", $order->shoppingCart->client->dir_com, $order->shoppingCart->user->rolName, $dateDelivery);
 	
 	//Productos
 	
